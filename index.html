@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scan 3D</title>
+<meta name="description" content="Scan 3D par photos et planche ChArUco, export STL à l'échelle. Calcul entièrement local.">
+<meta name="theme-color" content="#f4f3ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161615" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6f5e'/%3E%3Cpath d='M16 6l9 5v10l-9 5-9-5V11z' fill='none' stroke='white' stroke-width='2.2' stroke-linejoin='round'/%3E%3Cpath d='M7 11l9 5 9-5M16 16v10' fill='none' stroke='white' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --fond: #f4f3ef;
+    --carte: #ffffff;
+    --texte: #1d1d1b;
+    --doux: #6a6963;
+    --ligne: #e2e0d9;
+    --accent: #2f6f5e;
+    --accent-fond: #e3efe9;
+    --sur-accent: #ffffff;
+    --alerte: #9a5b00;
+    --alerte-fond: #fbf0dc;
+    --erreur: #b3261e;
+    --erreur-fond: #fbe5e3;
+    --masque: #2fb48c;
+    --rayon: 14px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fond: #161615;
+      --carte: #201f1d;
+      --texte: #ecebe6;
+      --doux: #a3a199;
+      --ligne: #34332f;
+      --accent: #63b69c;
+      --accent-fond: #1d3029;
+      --sur-accent: #0f1f1a;
+      --alerte: #e8b25c;
+      --alerte-fond: #33281a;
+      --erreur: #f09289;
+      --erreur-fond: #3a1f1c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fond: #161615; --carte: #201f1d; --texte: #ecebe6; --doux: #a3a199; --ligne: #34332f;
+    --accent: #63b69c; --accent-fond: #1d3029; --sur-accent: #0f1f1a;
+    --alerte: #e8b25c; --alerte-fond: #33281a; --erreur: #f09289; --erreur-fond: #3a1f1c;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--fond);
+    color: var(--texte);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 calc(96px + env(safe-area-inset-bottom));
+  }
+  header, main { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+  header { padding-top: 28px; padding-bottom: 8px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--doux); }
+  .carte {
+    background: var(--carte);
+    border: 1px solid var(--ligne);
+    border-radius: var(--rayon);
+    padding: 18px 16px;
+    margin: 16px 0;
+  }
+  h2 { font-size: 1.1rem; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+  .num {
+    display: inline-grid; place-items: center;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent-fond); color: var(--accent);
+    font-size: 0.85rem; font-weight: 700; flex: none;
+  }
+  p { margin: 0 0 12px; }
+  .doux { color: var(--doux); font-size: 0.92rem; }
+  ul.consignes { margin: 0 0 14px; padding-left: 20px; color: var(--doux); font-size: 0.92rem; }
+  ul.consignes li { margin: 2px 0; }
+  .boutons { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
+  .bouton, button.bouton {
+    appearance: none; border: 1px solid transparent; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; padding: 10px 16px; border-radius: 10px;
+    background: var(--accent); color: var(--sur-accent);
+    font: inherit; font-weight: 600; text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bouton.secondaire { background: transparent; color: var(--accent); border-color: var(--ligne); }
+  .bouton:disabled, .bouton.desactive { opacity: 0.45; pointer-events: none; }
+  .bouton:focus-visible, input:focus-visible, .vignette:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  label.champ { display: grid; gap: 4px; font-size: 0.9rem; color: var(--doux); }
+  input[type="number"], input[type="text"], input[type="url"] {
+    font: inherit; color: var(--texte); background: var(--fond);
+    border: 1px solid var(--ligne); border-radius: 8px;
+    padding: 9px 10px; min-height: 44px; width: 100%;
+  }
+  .grille-champs { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
+  details { margin-top: 14px; border-top: 1px solid var(--ligne); padding-top: 10px; }
+  summary { cursor: pointer; color: var(--accent); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+  progress { width: 100%; height: 8px; margin-top: 12px; accent-color: var(--accent); }
+  .etat { font-size: 0.92rem; padding: 8px 10px; border-radius: 8px; background: var(--fond); margin-bottom: 4px; }
+  .etat[data-type="ok"] { background: var(--accent-fond); color: var(--accent); }
+  .etat[data-type="alerte"] { background: var(--alerte-fond); color: var(--alerte); }
+  #photos-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 12px; }
+  .vignette {
+    appearance: none; padding: 0; margin: 0; border: 2px solid var(--accent); border-radius: 10px;
+    background: var(--fond); overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
+    color: var(--texte); font: inherit; text-align: left; -webkit-tap-highlight-color: transparent;
+  }
+  .vignette canvas { width: 100%; height: auto; display: block; aspect-ratio: 4 / 3; object-fit: cover; background: var(--ligne); }
+  .vignette .legende { font-size: 0.72rem; padding: 4px 6px; line-height: 1.25; color: var(--doux); min-height: calc(2 * 1.25em + 8px); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .vignette[data-etat="attente"] { border-color: var(--ligne); }
+  .vignette[data-etat="erreur"] { border-color: var(--erreur); cursor: default; }
+  .vignette[data-etat="erreur"] .legende { color: var(--erreur); }
+  .vignette[data-etat="erreur"] canvas, .vignette.exclue canvas { opacity: 0.35; }
+  .vignette.exclue { border-color: var(--ligne); border-style: dashed; }
+  #vue3d {
+    width: 100%; aspect-ratio: 4 / 3; max-height: 60vh; border-radius: 10px; overflow: hidden;
+    background: var(--fond); border: 1px solid var(--ligne); touch-action: none;
+    display: grid; place-items: center; color: var(--doux); text-align: center; padding: 0;
+  }
+  #vue3d canvas { width: 100% !important; height: 100% !important; display: block; }
+  table.dims { width: 100%; border-collapse: collapse; margin-top: 14px; font-variant-numeric: tabular-nums; }
+  table.dims th, table.dims td { padding: 6px 4px; text-align: left; border-bottom: 1px solid var(--ligne); }
+  table.dims th { font-weight: 600; color: var(--doux); font-size: 0.85rem; }
+  table.dims td:first-child { font-weight: 700; width: 2.5em; }
+  table.dims input { max-width: 140px; }
+  .case { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; min-height: 44px; }
+  .case input { width: 22px; height: 22px; accent-color: var(--accent); }
+  .ligne-coupe { display: flex; gap: 8px; align-items: end; margin-top: 12px; }
+  .ligne-coupe label { flex: 1; }
+  #message {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: min(728px, calc(100% - 32px));
+    background: var(--carte); color: var(--texte);
+    border: 1px solid var(--ligne); border-radius: 12px;
+    padding: 10px 14px; font-size: 0.92rem; box-shadow: 0 6px 24px rgb(0 0 0 / 0.12);
+    z-index: 10; max-height: 30vh; overflow: auto;
+  }
+  #message:empty { display: none; }
+  #message[data-type="ok"] { border-color: var(--accent); }
+  #message[data-type="alerte"] { border-color: var(--alerte); color: var(--alerte); background: var(--alerte-fond); }
+  #message[data-type="erreur"] { border-color: var(--erreur); color: var(--erreur); background: var(--erreur-fond); }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>Scan 3D</h1>
+  <p>Des photos autour de l'objet, une planche imprimée, un STL à l'échelle. Tout le calcul se fait sur cet appareil, aucune photo n'est envoyée.</p>
+</header>
+
+<main>
+  <section class="carte" aria-labelledby="t-planche">
+    <h2 id="t-planche"><span class="num">1</span>Planche de référence</h2>
+    <p>Imprimer la planche en taille réelle (100 %, sans ajustement à la page), la coller bien à plat sur un support rigide, puis mesurer la barre de contrôle au pied à coulisse.</p>
+    <div class="boutons">
+      <a class="bouton secondaire" href="planche.pdf" download>Télécharger la planche (PDF A4)</a>
+    </div>
+    <div class="grille-champs">
+      <label class="champ">Barre de contrôle mesurée (mm)
+        <input id="r-barre" type="number" inputmode="decimal" step="0.1" min="90" max="110">
+      </label>
+    </div>
+  </section>
+
+  <section class="carte" aria-labelledby="t-calib">
+    <h2 id="t-calib"><span class="num">2</span>Calibration du téléphone</h2>
+    <p class="doux">Une seule fois par téléphone. 15 à 25 photos de la planche seule, sous des angles et à des distances variés, planche entière visible.</p>
+    <ul class="consignes">
+      <li>Zoom x1, mode photo classique, toujours la même orientation (paysage conseillé).</li>
+      <li>Sur iPhone Pro, désactiver le contrôle macro (Réglages, Appareil photo).</li>
+      <li>Les mêmes règles s'appliquent ensuite aux photos de l'objet.</li>
+    </ul>
+    <div id="calib-etat" class="etat"></div>
+    <div class="boutons">
+      <label class="bouton" data-bloquable>
+        <input id="calib-fichiers" type="file" accept="image/*" multiple data-bloquable>
+        Choisir les photos de calibration
+      </label>
+      <button id="calib-exporter" class="bouton secondaire" type="button">Exporter</button>
+      <label class="bouton secondaire" data-bloquable>
+        <input id="calib-importer" type="file" accept="application/json,.json" data-bloquable>
+        Importer
+      </label>
+      <button id="calib-effacer" class="bouton secondaire" type="button" data-bloquable>Effacer</button>
+    </div>
+    <progress id="calib-progres" max="1" value="0" hidden></progress>
+  </section>
+
+  <section class="carte" aria-labelledby="t-photos">
+    <h2 id="t-photos"><span class="num">3</span>Photos de l'objet</h2>
+    <ul class="consignes">
+      <li>Objet au centre de la planche, arêtes alignées sur le quadrillage, lumière diffuse.</li>
+      <li>40 à 80 photos : un tour bas, un tour à 45 degrés, quelques vues presque verticales.</li>
+      <li>Une partie de la planche visible sur chaque photo, objet net.</li>
+      <li>Objet brillant ou transparent : le matifier (spray, talc).</li>
+    </ul>
+    <p class="doux">Au premier usage, le modèle de détourage (44 Mo) est téléchargé puis gardé en cache.</p>
+    <div class="boutons">
+      <label id="photos-ajouter" class="bouton" data-bloquable>
+        <input id="photos-fichiers" type="file" accept="image/*" multiple data-bloquable>
+        Ajouter des photos
+      </label>
+      <button id="photos-effacer" class="bouton secondaire" type="button">Tout retirer</button>
+    </div>
+    <progress id="photos-progres" max="1" value="0" hidden></progress>
+    <p id="photos-resume" class="doux" style="margin-top:12px"></p>
+    <div id="photos-grille"></div>
+  </section>
+
+  <section class="carte" aria-labelledby="t-recon">
+    <h2 id="t-recon"><span class="num">4</span>Reconstruction</h2>
+    <p class="doux">Sculpture du volume par les silhouettes. Les creux (intérieur d'un bol, trou borgne) ne sont pas reconstruits.</p>
+    <div class="boutons">
+      <button id="recon-lancer" class="bouton" type="button" data-bloquable disabled>Reconstruire</button>
+    </div>
+    <progress id="recon-progres" max="1" value="0" hidden></progress>
+    <details>
+      <summary>Réglages avancés</summary>
+      <div class="grille-champs">
+        <label class="champ">Taille de voxel (mm)
+          <input id="r-voxel" type="number" inputmode="decimal" step="0.1" min="0.2" max="5">
+        </label>
+        <label class="champ">Emprise du volume (mm)
+          <input id="r-emprise" type="number" inputmode="decimal" step="10" min="20" max="180">
+        </label>
+        <label class="champ">Hauteur du volume (mm)
+          <input id="r-hauteur" type="number" inputmode="decimal" step="10" min="10" max="250">
+        </label>
+        <label class="champ">Tolérance (vues)
+          <input id="r-tolerance" type="number" inputmode="numeric" step="1" min="0" max="10">
+        </label>
+        <label class="champ">Lissage (itérations)
+          <input id="r-lissage" type="number" inputmode="numeric" step="1" min="0" max="50">
+        </label>
+      </div>
+      <p class="doux" style="margin-top:12px">Voxel plus petit : plus de détails, calcul plus long (0,5 mm prend environ 4 fois plus de temps que 0,8 mm). Tolérance : nombre de photos où un point peut sortir de la silhouette sans être enlevé.</p>
+      <label class="champ" style="margin-top:8px">Modèle de détourage (URL ONNX, laisser vide pour RMBG-1.4)
+        <input id="r-modele" type="url" placeholder="https://...">
+      </label>
+    </details>
+  </section>
+
+  <section id="resultat" class="carte" aria-labelledby="t-resultat" hidden>
+    <h2 id="t-resultat"><span class="num">5</span>Dimensions et export</h2>
+    <div id="vue3d"></div>
+    <p class="doux" style="margin-top:8px">X : petit côté de la feuille, Y : grand côté, Z : hauteur. Glisser pour tourner, pincer pour zoomer.</p>
+    <table class="dims">
+      <thead><tr><th>Axe</th><th>Scan (mm)</th><th>Final (mm)</th></tr></thead>
+      <tbody>
+        <tr><td>X</td><td id="m-x"></td><td><input id="d-x" type="number" inputmode="decimal" step="0.01" min="0" data-bloquable></td></tr>
+        <tr><td>Y</td><td id="m-y"></td><td><input id="d-y" type="number" inputmode="decimal" step="0.01" min="0" data-bloquable></td></tr>
+        <tr><td>Z</td><td id="m-z"></td><td><input id="d-z" type="number" inputmode="decimal" step="0.01" min="0" data-bloquable></td></tr>
+      </tbody>
+    </table>
+    <label class="case"><input id="d-lier" type="checkbox" checked> Proportionnel : modifier une cote ajuste les deux autres</label>
+    <p id="d-facteurs" class="doux"></p>
+    <div class="boutons">
+      <button id="d-appliquer" class="bouton" type="button" data-bloquable>Appliquer les cotes</button>
+      <button id="d-aligner" class="bouton secondaire" type="button" data-bloquable>Aligner sur les axes</button>
+      <button id="d-reinit" class="bouton secondaire" type="button" data-bloquable>Revenir au scan</button>
+    </div>
+    <div class="ligne-coupe">
+      <label class="champ">Couper à la hauteur (mm), pour un dessus plat
+        <input id="d-couper" type="number" inputmode="decimal" step="0.1" min="0" placeholder="aucune coupe" data-bloquable>
+      </label>
+      <button id="d-couper-btn" class="bouton secondaire" type="button" data-bloquable>Couper</button>
+    </div>
+    <p class="doux" style="margin-top:8px">La méthode surestime la hauteur des dessus plats : mesurer la hauteur réelle et couper, plutôt que réduire Z, qui écraserait tout l'objet.</p>
+    <div class="boutons">
+      <button id="stl-telecharger" class="bouton" type="button" data-bloquable>Télécharger le STL</button>
+    </div>
+  </section>
+</main>
+
+<div id="message" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
