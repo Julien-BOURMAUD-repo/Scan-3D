@@ -173,7 +173,8 @@ function majCalib() {
   const c = etat.calib;
   const el = $('calib-etat');
   if (c) {
-    el.textContent = `Calibré : ${c.images} photos, erreur ${fmt(c.rms, 3)} px, images ${c.largeur} x ${c.hauteur}.`;
+    const src = c.source === 'direct' ? 'en direct' : c.source === 'photos' ? 'avec des photos' : 'importé';
+    el.textContent = `Calibré ${src} : ${c.images} images, erreur ${fmt(c.rms, 3)} px, ${c.largeur} x ${c.hauteur}.`;
     el.dataset.type = c.rms <= 1 ? 'ok' : 'alerte';
   } else {
     el.textContent = 'Pas encore calibré.';
@@ -208,28 +209,33 @@ async function calibrer(fichiers) {
       const r = await vision.appel('calib-ajouter', { gris, w: W, h: H }, [gris.buffer]);
       if (r.n >= 12) ok++; else rejets.push(`${f.name} (planche non détectée)`);
     }
-    if (ok < 8) throw new Error(`Seulement ${ok} photos exploitables (8 minimum, 15 à 25 conseillées).`);
-    message('Calcul de la calibration...');
-    const r = await vision.appel('calibrer', { w: taille[0], h: taille[1] });
-    etat.calib = {
-      largeur: taille[0], hauteur: taille[1], K: r.K, dist: r.dist, rms: r.rms,
-      images: ok, date: new Date().toISOString(),
-    };
-    ecrire(CLE_CALIB, etat.calib);
-    let txt = `Calibration terminée : erreur ${fmt(r.rms, 3)} px sur ${ok} photos.`;
-    if (r.rms > 1) txt += ' Erreur élevée : vérifier la netteté et la planéité de la feuille.';
-    if (rejets.length) txt += ` Ignorées : ${rejets.join(', ')}.`;
-    message(txt, r.rms > 1 ? 'alerte' : 'ok');
-    if (etat.vues.length) {
-      message(txt + ' Les photos de l\'objet déjà chargées doivent être rechargées.', 'alerte');
-      viderPhotos();
-    }
+    await calculerCalibration(taille, ok, rejets, 'photos');
   } catch (err) {
     message('Calibration : ' + err.message, 'erreur');
   } finally {
     barre.hidden = true;
     majCalib();
     occuper(false);
+  }
+}
+
+/* Calcul final, commun aux photos et a la prise en direct (images deja ajoutees au worker). */
+async function calculerCalibration(taille, ok, rejets, source) {
+  if (ok < 8) throw new Error(`Seulement ${ok} images exploitables (8 minimum, 15 à 25 conseillées).`);
+  message('Calcul de la calibration...');
+  const r = await vision.appel('calibrer', { w: taille[0], h: taille[1] });
+  etat.calib = {
+    largeur: taille[0], hauteur: taille[1], K: r.K, dist: r.dist, rms: r.rms,
+    images: ok, source, date: new Date().toISOString(),
+  };
+  ecrire(CLE_CALIB, etat.calib);
+  let txt = `Calibration terminée : erreur ${fmt(r.rms, 3)} px sur ${ok} images.`;
+  if (r.rms > 1) txt += ' Erreur élevée : vérifier la netteté et la planéité de la feuille.';
+  if (rejets.length) txt += ` Ignorées : ${rejets.join(', ')}.`;
+  message(txt, r.rms > 1 ? 'alerte' : 'ok');
+  if (etat.vues.length) {
+    message(txt + ' Les photos de l\'objet déjà prises doivent être refaites.', 'alerte');
+    viderPhotos();
   }
 }
 
@@ -309,6 +315,7 @@ function majBoutons() {
   const actives = etat.vues.filter((v) => v.etat === 'ok' && v.actif).length;
   $('recon-lancer').disabled = etat.occupe || actives < MIN_VUES;
   $('photos-ajouter').classList.toggle('desactive', etat.occupe || !etat.calib);
+  $('photos-direct').disabled = etat.occupe || !etat.calib;
   $('photos-effacer').disabled = etat.occupe || !etat.vues.length;
 }
 
@@ -320,6 +327,10 @@ function viderPhotos() {
 
 async function ajouterPhotos(fichiers) {
   if (!etat.calib) { message('Faire la calibration du téléphone avant de charger les photos de l\'objet.', 'alerte'); return; }
+  if (etat.calib.source === 'direct') {
+    message('La calibration a été faite en direct : le cadrage de la caméra en direct diffère de celui de l\'appareil photo. Utiliser la prise en direct, ou refaire la calibration avec des photos.', 'alerte');
+    return;
+  }
   occuper(true);
   const barre = $('photos-progres');
   barre.hidden = false; barre.value = 0;
@@ -376,6 +387,429 @@ async function ajouterPhotos(fichiers) {
     message('Photos : ' + err.message, 'erreur');
   } finally {
     barre.hidden = true;
+    occuper(false);
+    majResume();
+  }
+}
+
+/* ---------- Prise en direct ---------- */
+
+const DIRECT = {
+  vitesseMax: 120,      // deplacement maximal des coins de la planche dans l'image (px/s) pour prendre une image
+  coinsMin: 12,         // coins ChArUco minimum pour une vue d'objet
+  calibImages: 20,      // images a prendre pour la calibration
+  calibCoinsMin: 20,    // coins minimum pour une image de calibration
+  calibEcartDeg: 12,    // ecart d'angle minimum entre deux images de calibration
+  couverture: 0.85,     // part des cases du dome a remplir pour terminer automatiquement
+};
+// Dome de prise de vue : anneaux d'elevation (degres) decoupes en cases d'azimut
+const ANNEAUX = [
+  { min: 20, max: 40, n: 16 },
+  { min: 40, max: 60, n: 16 },
+  { min: 60, max: 78, n: 12 },
+  { min: 78, max: 90.01, n: 4 },
+];
+const NB_CASES = ANNEAUX.reduce((s, a) => s + a.n, 0);
+const CASES_VISEES = Math.ceil(NB_CASES * DIRECT.couverture);
+
+let direct = null;
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function projeterPoint(K, d, R, t, X, Y, Z) {
+  const x = R[0] * X + R[1] * Y + R[2] * Z + t[0];
+  const y = R[3] * X + R[4] * Y + R[5] * Z + t[1];
+  const z = R[6] * X + R[7] * Y + R[8] * Z + t[2];
+  const xn = x / z, yn = y / z;
+  const r2 = xn * xn + yn * yn;
+  const rad = 1 + r2 * (d[0] + r2 * (d[1] + r2 * (d[4] || 0)));
+  const xd = xn * rad + 2 * d[2] * xn * yn + d[3] * (r2 + 2 * xn * xn);
+  const yd = yn * rad + d[2] * (r2 + 2 * yn * yn) + 2 * d[3] * xn * yn;
+  return [K[0] * xd + K[1] * yd + K[2], K[4] * yd + K[5]];
+}
+
+/* Direction de la camera vue du centre de la planche (coordonnees nominales de la planche). */
+function directionCamera(v) {
+  const R = v.R, t = v.t;
+  const C = [
+    -(R[0] * t[0] + R[3] * t[1] + R[6] * t[2]),
+    -(R[1] * t[0] + R[4] * t[1] + R[7] * t[2]),
+    -(R[2] * t[0] + R[5] * t[1] + R[8] * t[2]),
+  ];
+  const dx = C[0] - (PLANCHE.nx * PLANCHE.carre) / 2;
+  const dy = C[1] - (PLANCHE.ny * PLANCHE.carre) / 2;
+  const dz = Math.abs(C[2]);
+  const n = Math.hypot(dx, dy, dz) || 1;
+  const elev = (Math.atan2(dz, Math.hypot(dx, dy)) * 180) / Math.PI;
+  const az = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+  return { elev, az, u: [dx / n, dy / n, dz / n] };
+}
+
+function caseDe(dir) {
+  const i = ANNEAUX.findIndex((a) => dir.elev >= a.min && dir.elev < a.max);
+  if (i < 0) return null;
+  return `${i}-${Math.floor(dir.az / (360 / ANNEAUX[i].n)) % ANNEAUX[i].n}`;
+}
+
+function coinsPlanche() {
+  const L = PLANCHE.nx * PLANCHE.carre, H = PLANCHE.ny * PLANCHE.carre;
+  return [[0, 0], [L, 0], [L, H], [0, H]];
+}
+
+function cameraDirect(d, W, H) {
+  if (d.mode === 'calib') {
+    const f = 0.8 * Math.max(W, H); // estimation grossiere, suffisante pour juger la diversite des angles
+    return { K: [f, 0, (W - 1) / 2, 0, f, (H - 1) / 2, 0, 0, 1], dist: [0, 0, 0, 0, 0] };
+  }
+  const c = etat.calib;
+  if (W === c.largeur && H === c.hauteur) return { K: c.K, dist: c.dist };
+  if (W === c.hauteur && H === c.largeur) return { erreur: 'Tourner le téléphone dans l\'orientation utilisée pour la calibration.' };
+  return { erreur: `La caméra donne ${W} x ${H}, la calibration a été faite en ${c.largeur} x ${c.hauteur} : refaire la calibration en direct.` };
+}
+
+function consigneScan(d, dir) {
+  const i = ANNEAUX.findIndex((a) => dir.elev >= a.min && dir.elev < a.max);
+  const vides = ANNEAUX.map((a, k) => {
+    let n = 0;
+    for (let b = 0; b < a.n; b++) if (!d.cases.has(`${k}-${b}`)) n++;
+    return n;
+  });
+  if (vides[i] > 0) return 'Vue déjà prise : continuer à tourner autour de l\'objet';
+  const plusHaut = vides.findIndex((n, k) => k > i && n > 0);
+  const plusBas = vides.findIndex((n, k) => k < i && n > 0);
+  if (plusBas >= 0) return 'Cet étage est complet : descendre le téléphone';
+  if (plusHaut >= 0) return 'Cet étage est complet : monter le téléphone';
+  return 'Couverture complète';
+}
+
+function evaluer(d, p, t, cam) {
+  if (!p.R || p.n < DIRECT.coinsMin) {
+    d.precedent = null;
+    return { consigne: 'Planche non détectée : la garder dans le cadre, au moins en partie', niveau: 'alerte' };
+  }
+  const coins = coinsPlanche().map(([X, Y]) => projeterPoint(cam.K, cam.dist, p.R, p.t, X, Y, 0));
+  let vitesse = Infinity;
+  if (d.precedent && t - d.precedent.t < 1500) {
+    let m = 0;
+    coins.forEach((q, i) => { m = Math.max(m, Math.hypot(q[0] - d.precedent.coins[i][0], q[1] - d.precedent.coins[i][1])); });
+    vitesse = m / ((t - d.precedent.t) / 1000);
+  }
+  d.precedent = { t, coins };
+  const direction = directionCamera(p);
+  if (vitesse > DIRECT.vitesseMax) return { direction, consigne: 'Stabiliser le téléphone', niveau: '' };
+  if (d.mode === 'scan') {
+    if (p.err > ERREUR_POSE_MAX) return { direction, consigne: 'Image peu nette : stabiliser le téléphone', niveau: 'alerte' };
+    const c = caseDe(direction);
+    if (!c) return { direction, consigne: 'Vue trop rasante : monter le téléphone', niveau: 'alerte' };
+    if (d.cases.has(c)) return { direction, consigne: consigneScan(d, direction), niveau: '' };
+    return { ok: true, direction, cle: c };
+  }
+  if (direction.elev < 20) return { direction, consigne: 'Vue trop rasante : monter le téléphone', niveau: 'alerte' };
+  if (p.n < DIRECT.calibCoinsMin) return { direction, consigne: 'Cadrer une plus grande partie de la planche', niveau: 'alerte' };
+  const proche = d.directions.some((u) => (Math.acos(Math.min(1, u[0] * direction.u[0] + u[1] * direction.u[1] + u[2] * direction.u[2])) * 180) / Math.PI < DIRECT.calibEcartDeg);
+  if (proche) return { direction, consigne: 'Changer d\'angle : tourner autour de la planche, plus haut ou plus bas', niveau: '' };
+  return { ok: true, direction };
+}
+
+function dessinerCalque(d, p, cam, W, H, ok) {
+  const cnv = $('direct-calque');
+  const r = cnv.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cw = Math.round(r.width * dpr), ch = Math.round(r.height * dpr);
+  if (cnv.width !== cw || cnv.height !== ch) { cnv.width = cw; cnv.height = ch; }
+  const ctx = cnv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, r.width, r.height);
+  if (!p || !p.R) return;
+  const s = Math.min(r.width / W, r.height / H);
+  const ox = (r.width - W * s) / 2, oy = (r.height - H * s) / 2;
+  const tracer = (pts) => {
+    ctx.beginPath();
+    pts.forEach(([X, Y], i) => {
+      const [u, v] = projeterPoint(cam.K, cam.dist, p.R, p.t, X, Y, 0);
+      if (i === 0) ctx.moveTo(ox + u * s, oy + v * s); else ctx.lineTo(ox + u * s, oy + v * s);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  };
+  const contour = (x0, y0, x1, y1) => {
+    const pts = [];
+    const n = 12;
+    for (let i = 0; i < n; i++) pts.push([x0 + ((x1 - x0) * i) / n, y0]);
+    for (let i = 0; i < n; i++) pts.push([x1, y0 + ((y1 - y0) * i) / n]);
+    for (let i = 0; i < n; i++) pts.push([x1 - ((x1 - x0) * i) / n, y1]);
+    for (let i = 0; i < n; i++) pts.push([x0, y1 - ((y1 - y0) * i) / n]);
+    return pts;
+  };
+  const L = PLANCHE.nx * PLANCHE.carre, Hp = PLANCHE.ny * PLANCHE.carre;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = ok ? '#4fd1a5' : 'rgba(255, 255, 255, 0.85)';
+  tracer(contour(0, 0, L, Hp));
+  if (d.mode === 'scan') {
+    // Zone de travail : l'objet doit tenir dans ce carre
+    const e = reglages().emprise / facteurPlanche() / 2;
+    ctx.setLineDash([8, 6]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255, 214, 102, 0.9)';
+    tracer(contour(L / 2 - e, Hp / 2 - e, L / 2 + e, Hp / 2 + e));
+    ctx.setLineDash([]);
+  }
+}
+
+function dessinerDome(d, courant) {
+  const cnv = $('direct-dome');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const taille = 150;
+  if (cnv.width !== taille * dpr) { cnv.width = taille * dpr; cnv.height = taille * dpr; }
+  const ctx = cnv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, taille, taille);
+  const c = taille / 2, R = taille / 2 - 6;
+  const rayon = (e) => (R * (90 - Math.min(90, e))) / 70;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.beginPath(); ctx.arc(c, c, R + 4, 0, 2 * Math.PI); ctx.fill();
+  if (d.mode === 'scan') {
+    ANNEAUX.forEach((a, i) => {
+      const pas = (2 * Math.PI) / a.n;
+      for (let b = 0; b < a.n; b++) {
+        ctx.beginPath();
+        ctx.arc(c, c, rayon(a.min), b * pas, (b + 1) * pas);
+        ctx.arc(c, c, Math.max(0, rayon(a.max)), (b + 1) * pas, b * pas, true);
+        ctx.closePath();
+        ctx.fillStyle = d.cases.has(`${i}-${b}`) ? 'rgba(79, 209, 165, 0.9)' : 'rgba(255, 255, 255, 0.12)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    });
+  } else {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    for (const e of [20, 40, 60, 78]) { ctx.beginPath(); ctx.arc(c, c, rayon(e), 0, 2 * Math.PI); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(79, 209, 165, 0.95)';
+    for (const u of d.directions) {
+      const e = (Math.asin(Math.min(1, u[2])) * 180) / Math.PI, a = Math.atan2(u[1], u[0]);
+      ctx.beginPath(); ctx.arc(c + rayon(e) * Math.cos(a), c + rayon(e) * Math.sin(a), 4, 0, 2 * Math.PI); ctx.fill();
+    }
+  }
+  if (courant) {
+    const a = (courant.az * Math.PI) / 180, r = rayon(Math.max(20, courant.elev));
+    ctx.beginPath(); ctx.arc(c + r * Math.cos(a), c + r * Math.sin(a), 6, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#000000'; ctx.stroke();
+  }
+}
+
+function majDirect(d, consigne, niveau) {
+  if (consigne !== undefined) {
+    $('direct-consigne').textContent = consigne;
+    $('direct-consigne').dataset.niveau = niveau || '';
+  }
+  if (d.mode === 'calib') {
+    $('direct-compteur').textContent = `${d.prises} / ${DIRECT.calibImages} images`;
+    $('direct-terminer').disabled = d.prises < 8;
+  } else {
+    let txt = `${d.cases.size} / ${NB_CASES} vues`;
+    if (d.enCours) txt += ` - détourage : ${d.enCours} en attente`;
+    $('direct-compteur').textContent = txt;
+    $('direct-terminer').disabled = d.cases.size < MIN_VUES;
+  }
+}
+
+function signalerPrise() {
+  const f = $('direct-flash');
+  f.classList.remove('actif');
+  void f.offsetWidth;
+  f.classList.add('actif');
+  try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* non supporte */ }
+}
+
+async function prendre(d, p, ev, W, H) {
+  signalerPrise();
+  if (d.mode === 'calib') {
+    const r = await vision.appel('calib-garder');
+    if (r.garde) { d.directions.push(ev.direction.u); d.prises++; d.taille = [W, H]; }
+    return;
+  }
+  d.cases.add(ev.cle);
+  const vue = { nom: `direct-${etat.vues.length + 1}`, etat: 'attente', actif: true, R: p.R, t: p.t, n: p.n, err: p.err };
+  etat.vues.push(vue);
+  creerVignette(vue);
+  vue.canvas.width = 160;
+  vue.canvas.height = Math.round((160 * H) / W);
+  vue.canvas.getContext('2d').drawImage(d.toile, 0, 0, vue.canvas.width, vue.canvas.height);
+  majVignette(vue);
+  const ms = TAILLE_MASQUE / Math.max(W, H);
+  vue.mw = Math.round(W * ms); vue.mh = Math.round(H * ms);
+  const rgba = pixels(d.toile, TAILLE_SEG, TAILLE_SEG);
+  d.enCours++;
+  // Detourage en file d'attente : la prise de vue continue pendant le calcul
+  d.file = d.file.then(async () => {
+    try {
+      const s = await seg.appel('segmenter', { rgba, S: TAILLE_SEG, mw: vue.mw, mh: vue.mh }, [rgba.buffer]);
+      vue.masque = s.masque;
+      dessinerMasque(vue);
+      let surface = 0;
+      for (let k = 0; k < s.masque.length; k++) surface += s.masque[k];
+      if (surface < s.masque.length * 0.001) throw new Error('Objet non détouré');
+      vue.etat = 'ok';
+    } catch (err) {
+      vue.etat = 'erreur';
+      vue.raison = err.message;
+    }
+    d.enCours--;
+    majVignette(vue);
+    majResume();
+    if (d.actif) majDirect(d);
+  });
+}
+
+/* Scan termine : couverture globale atteinte et chaque etage du dome (dessus compris) rempli aux trois quarts. */
+function fini(d) {
+  if (d.mode === 'calib') return d.prises >= DIRECT.calibImages;
+  if (d.cases.size < CASES_VISEES) return false;
+  return ANNEAUX.every((a, i) => {
+    let n = 0;
+    for (let b = 0; b < a.n; b++) if (d.cases.has(`${i}-${b}`)) n++;
+    return n >= Math.ceil(a.n * 0.75);
+  });
+}
+
+async function ouvrirDirect(mode) {
+  if (etat.occupe || direct) return;
+  if (mode === 'scan' && !etat.calib) { message('Faire d\'abord la calibration en direct.', 'alerte'); return; }
+  if (mode === 'scan' && etat.calib.source === 'photos') {
+    message('La calibration a été faite avec des photos : le cadrage de la caméra en direct est différent. Refaire la calibration en direct.', 'alerte');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    message('Caméra inaccessible : ouvrir l\'appli en HTTPS (GitHub Pages) dans un navigateur récent.', 'erreur');
+    return;
+  }
+  occuper(true);
+  let flux = null;
+  try {
+    await initVision();
+    if (mode === 'scan') await initSeg();
+    if (mode === 'calib') await vision.appel('calib-reset');
+    flux = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } },
+    });
+  } catch (err) {
+    occuper(false);
+    const refus = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    message('Caméra : ' + (refus ? 'accès refusé. Autoriser la caméra pour ce site dans les réglages du navigateur.' : err.message), 'erreur');
+    return;
+  }
+  const video = $('direct-video');
+  video.srcObject = flux;
+  const d = {
+    mode, flux, video, actif: true, action: 'arreter',
+    cases: new Set(), directions: [], prises: 0, taille: null,
+    precedent: null, file: Promise.resolve(), enCours: 0,
+    toile: document.createElement('canvas'), verrou: null,
+  };
+  direct = d;
+  if (mode === 'scan') {
+    // Reprise : les vues deja prises comptent dans la couverture
+    for (const v of etat.vues) if (v.R && v.etat !== 'erreur') { const c = caseDe(directionCamera(v)); if (c) d.cases.add(c); }
+  }
+  flux.getVideoTracks().forEach((tr) => { tr.onended = () => { d.actif = false; }; });
+  try { if (navigator.wakeLock) d.verrou = await navigator.wakeLock.request('screen'); } catch (e) { d.verrou = null; }
+  $('direct-titre').textContent = mode === 'calib' ? 'Calibration en direct' : 'Scan en direct';
+  $('direct-terminer').textContent = mode === 'calib' ? 'Calculer la calibration' : 'Terminer et reconstruire';
+  $('direct').hidden = false;
+  document.body.classList.add('direct-ouvert');
+  majDirect(d, mode === 'calib'
+    ? 'Planche seule, sans objet : tourner autour en variant hauteur et distance'
+    : 'Tourner lentement autour de l\'objet, les images sont prises automatiquement');
+  dessinerDome(d, null);
+  try { await video.play(); } catch (e) { /* lecture relancee par l'utilisateur */ }
+  boucleDirect(d);
+}
+
+async function boucleDirect(d) {
+  const ctx = d.toile.getContext('2d', { willReadFrequently: true });
+  try {
+    while (d.actif) {
+      const v = d.video;
+      if (v.readyState < 2 || !v.videoWidth) { await pause(60); continue; }
+      const s = Math.min(1, TAILLE_TRAVAIL / Math.max(v.videoWidth, v.videoHeight));
+      const W = Math.round(v.videoWidth * s), H = Math.round(v.videoHeight * s);
+      if (d.toile.width !== W || d.toile.height !== H) { d.toile.width = W; d.toile.height = H; d.precedent = null; }
+      const cam = cameraDirect(d, W, H);
+      if (cam.erreur) { majDirect(d, cam.erreur, 'alerte'); dessinerCalque(d, null); await pause(400); continue; }
+      ctx.drawImage(v, 0, 0, W, H);
+      const t = performance.now();
+      const gris = versGris(ctx.getImageData(0, 0, W, H).data);
+      let p;
+      try {
+        p = await vision.appel('pose', { gris, w: W, h: H, K: cam.K, dist: cam.dist }, [gris.buffer]);
+      } catch (err) {
+        majDirect(d, 'Erreur d\'analyse : ' + err.message, 'alerte');
+        await pause(300);
+        continue;
+      }
+      if (!d.actif) break;
+      const ev = evaluer(d, p, t, cam);
+      dessinerCalque(d, p, cam, W, H, ev.ok);
+      dessinerDome(d, ev.direction);
+      if (ev.ok) {
+        await prendre(d, p, ev, W, H);
+        majDirect(d, d.mode === 'calib' ? 'Image prise' : 'Vue prise', 'ok');
+        dessinerDome(d, ev.direction);
+      } else {
+        majDirect(d, ev.consigne, ev.niveau);
+      }
+      if (fini(d)) { d.action = 'terminer'; break; }
+    }
+  } finally {
+    d.actif = false;
+    d.flux.getTracks().forEach((tr) => tr.stop());
+    d.video.srcObject = null;
+    try { if (d.verrou) await d.verrou.release(); } catch (e) { /* deja libere */ }
+    $('direct').hidden = true;
+    document.body.classList.remove('direct-ouvert');
+  }
+  await finaliserDirect(d);
+}
+
+async function finaliserDirect(d) {
+  try {
+    if (d.mode === 'calib') {
+      if (d.action !== 'terminer') { message('Calibration en direct annulée.', ''); return; }
+      await calculerCalibration(d.taille, d.prises, [], 'direct');
+      return;
+    }
+    const barre = $('photos-progres');
+    if (d.enCours) {
+      barre.hidden = false;
+      const total = d.enCours;
+      while (d.enCours) {
+        barre.value = 1 - d.enCours / total;
+        message(`Détourage des dernières vues : ${d.enCours} restantes...`);
+        await Promise.race([d.file, pause(250)]);
+      }
+      barre.hidden = true;
+    }
+    await d.file;
+    const actives = etat.vues.filter((v) => v.etat === 'ok' && v.actif).length;
+    if (d.action !== 'terminer') {
+      message(`Prise de vue arrêtée : ${actives} vues exploitables. Reprendre la prise en direct pour compléter, ou lancer la reconstruction.`, '');
+      return;
+    }
+    if (actives < MIN_VUES) {
+      message(`Seulement ${actives} vues exploitables (${MIN_VUES} minimum) : reprendre la prise en direct.`, 'alerte');
+      return;
+    }
+    occuper(false);
+    await reconstruire();
+  } catch (err) {
+    message((d.mode === 'calib' ? 'Calibration : ' : 'Prise en direct : ') + err.message, 'erreur');
+  } finally {
+    direct = null;
+    majCalib();
     occuper(false);
     majResume();
   }
@@ -703,6 +1137,10 @@ function demarrer() {
     majBoutons();
   });
   $('photos-effacer').addEventListener('click', viderPhotos);
+  $('calib-direct').addEventListener('click', () => ouvrirDirect('calib'));
+  $('photos-direct').addEventListener('click', () => ouvrirDirect('scan'));
+  $('direct-terminer').addEventListener('click', () => { if (direct) { direct.action = 'terminer'; direct.actif = false; } });
+  $('direct-arreter').addEventListener('click', () => { if (direct) { direct.action = 'arreter'; direct.actif = false; } });
   $('recon-lancer').addEventListener('click', reconstruire);
   AXES.forEach((a) => $('d-' + a).addEventListener('input', () => saisie(a)));
   $('d-appliquer').addEventListener('click', appliquerCotes);
@@ -710,7 +1148,7 @@ function demarrer() {
   $('d-aligner').addEventListener('click', aligner);
   $('d-couper-btn').addEventListener('click', couper);
   $('stl-telecharger').addEventListener('click', exporterSTL);
-  message(etat.calib ? 'Prêt. Charger les photos de l\'objet.' : 'Commencer par imprimer la planche et calibrer le téléphone.');
+  message(etat.calib ? 'Prêt. Lancer la prise en direct ou charger des photos de l\'objet.' : 'Commencer par imprimer la planche et calibrer le téléphone.');
 }
 
 demarrer();

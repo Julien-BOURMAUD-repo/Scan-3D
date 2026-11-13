@@ -52,6 +52,25 @@ navigateur.
    - "Couper à la hauteur" pour un objet à dessus plat, dont la hauteur est surestimée par la méthode.
    - "Télécharger le STL" : fichier en mm, posé sur Z = 0, centré en X/Y.
 
+## Prise en direct
+
+Les étapes 2 et 3 peuvent se faire caméra ouverte, sans passer par l'appareil photo :
+
+- **Calibrer en direct** : filmer la planche seule en tournant autour, en variant hauteur et
+  distance. 20 images sont prises automatiquement, puis la calibration est calculée.
+- **Prise en direct** : tourner lentement autour de l'objet. Une vue est prise dès que le
+  téléphone est stable sur un angle pas encore couvert. Le dôme en haut à droite montre les
+  angles pris (centre : vues du dessus, bord : vues basses), le point blanc la position actuelle.
+  Le cadre en pointillés est la zone de travail : l'objet doit tenir dedans. Quand chaque étage
+  du dôme est couvert, la capture s'arrête, les vues sont détourées et l'aperçu 3D s'affiche.
+  "Arrêter" garde les vues prises pour reprendre plus tard, "Terminer et reconstruire" lance
+  l'aperçu sans attendre la couverture complète.
+
+La calibration en direct et la calibration par photos ne sont pas interchangeables (cadrage
+différent) : le scan en direct demande une calibration en direct, dans la même orientation du
+téléphone. La caméra en direct a une résolution plus faible que les photos : le mode photos
+reste un peu plus précis.
+
 ## Limites
 
 - Les creux (intérieur d'un bol, rainure, trou borgne) ne sont pas reconstruits.

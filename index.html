@@ -144,6 +144,32 @@
     z-index: 10; max-height: 30vh; overflow: auto;
   }
   #message:empty { display: none; }
+  body.direct-ouvert { overflow: hidden; }
+  body.direct-ouvert #message { display: none; }
+  #direct { position: fixed; inset: 0; z-index: 20; background: #000; color: #fff; }
+  #direct[hidden] { display: none; }
+  #direct-video, #direct-calque { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #direct-video { object-fit: contain; background: #000; }
+  #direct-calque { pointer-events: none; }
+  #direct-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  #direct-flash.actif { animation: flash 0.25s ease-out; }
+  @keyframes flash { from { opacity: 0.55; } to { opacity: 0; } }
+  .direct-haut {
+    position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 12px;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px; font-size: 0.95rem;
+    background: linear-gradient(rgb(0 0 0 / 0.65), transparent);
+  }
+  #direct-dome { position: absolute; right: 12px; top: calc(52px + env(safe-area-inset-top)); width: 150px; height: 150px; }
+  .direct-bas {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 24px 16px calc(14px + env(safe-area-inset-bottom));
+    background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
+  }
+  #direct-consigne { font-size: 1.05rem; font-weight: 600; min-height: 1.5em; text-shadow: 0 1px 3px #000; }
+  #direct-consigne[data-niveau="alerte"] { color: #ffd666; }
+  #direct-consigne[data-niveau="ok"] { color: #4fd1a5; }
+  #direct .bouton { background: #4fd1a5; color: #06231b; }
+  #direct .bouton.secondaire { background: rgb(0 0 0 / 0.45); color: #fff; border-color: rgb(255 255 255 / 0.5); }
   #message[data-type="ok"] { border-color: var(--accent); }
   #message[data-type="alerte"] { border-color: var(--alerte); color: var(--alerte); background: var(--alerte-fond); }
   #message[data-type="erreur"] { border-color: var(--erreur); color: var(--erreur); background: var(--erreur-fond); }
@@ -186,10 +212,12 @@
       <li>Les mêmes règles s'appliquent ensuite aux photos de l'objet.</li>
     </ul>
     <div id="calib-etat" class="etat"></div>
+    <p class="doux" style="margin-top:10px">En direct : filmer la planche seule en tournant autour, 20 images sont prises automatiquement. La calibration en direct est obligatoire pour le scan en direct.</p>
     <div class="boutons">
-      <label class="bouton" data-bloquable>
+      <button id="calib-direct" class="bouton" type="button" data-bloquable>Calibrer en direct</button>
+      <label class="bouton secondaire" data-bloquable>
         <input id="calib-fichiers" type="file" accept="image/*" multiple data-bloquable>
-        Choisir les photos de calibration
+        Calibrer avec des photos
       </label>
       <button id="calib-exporter" class="bouton secondaire" type="button">Exporter</button>
       <label class="bouton secondaire" data-bloquable>
@@ -210,8 +238,10 @@
       <li>Objet brillant ou transparent : le matifier (spray, talc).</li>
     </ul>
     <p class="doux">Au premier usage, le modèle de détourage (44 Mo) est téléchargé puis gardé en cache.</p>
+    <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; le dôme à l'écran montre les angles pris. Quand la couverture est suffisante, l'aperçu 3D s'affiche tout seul.</p>
     <div class="boutons">
-      <label id="photos-ajouter" class="bouton" data-bloquable>
+      <button id="photos-direct" class="bouton" type="button" data-bloquable>Prise en direct</button>
+      <label id="photos-ajouter" class="bouton secondaire" data-bloquable>
         <input id="photos-fichiers" type="file" accept="image/*" multiple data-bloquable>
         Ajouter des photos
       </label>
@@ -286,6 +316,24 @@
     </div>
   </section>
 </main>
+
+<div id="direct" hidden>
+  <video id="direct-video" playsinline muted autoplay></video>
+  <canvas id="direct-calque"></canvas>
+  <div id="direct-flash"></div>
+  <div class="direct-haut">
+    <strong id="direct-titre"></strong>
+    <span id="direct-compteur"></span>
+  </div>
+  <canvas id="direct-dome" aria-hidden="true"></canvas>
+  <div class="direct-bas">
+    <div id="direct-consigne" role="status" aria-live="polite"></div>
+    <div class="boutons">
+      <button id="direct-arreter" class="bouton secondaire" type="button">Arrêter</button>
+      <button id="direct-terminer" class="bouton" type="button">Terminer</button>
+    </div>
+  </div>
+</div>
 
 <div id="message" role="status" aria-live="polite"></div>
 

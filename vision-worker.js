@@ -9,6 +9,7 @@ let detecteur = null;
 let cfg = null;
 let calibObj = [];
 let calibImg = [];
+let derniereDetection = null; // derniere image analysee par pose(), gardee pour la calibration en direct
 
 async function chargerOpenCV() {
   if (cv) return;
@@ -68,6 +69,7 @@ function projeter(R, t, K, d, X, Y, Z) {
 
 function pose(m) {
   const det = detecter(m.gris, m.w, m.h);
+  derniereDetection = det;
   if (det.n < 8) return { n: det.n };
   const objM = cv.matFromArray(det.n, 3, cv.CV_64F, Array.from(det.obj));
   const imgM = cv.matFromArray(det.n, 2, cv.CV_64F, Array.from(det.pts));
@@ -129,6 +131,11 @@ self.onmessage = async (e) => {
       const det = detecter(m.gris, m.w, m.h);
       if (det.n >= 12) { calibObj.push(det.obj); calibImg.push(det.pts); }
       r = { n: det.n };
+    } else if (m.type === 'calib-garder') {
+      const det = derniereDetection;
+      const garde = !!det && det.n >= 12;
+      if (garde) { calibObj.push(det.obj); calibImg.push(det.pts); }
+      r = { garde, total: calibObj.length };
     } else if (m.type === 'calibrer') {
       r = calibrer(m.w, m.h);
     } else {
