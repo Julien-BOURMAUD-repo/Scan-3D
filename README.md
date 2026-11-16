@@ -92,6 +92,16 @@ différent) : le scan en direct demande une calibration en direct, dans la même
 téléphone. La caméra en direct a une résolution plus faible que les photos : le mode photos
 reste un peu plus précis.
 
+## Objets blancs, gris ou noirs
+
+Sur la planche noir et blanc, un objet sans couleur se confond avec le damier. Deux solutions :
+
+- **Planche couleur** (`planche-couleur.pdf`, imprimante couleur) : mêmes marqueurs, en bleu foncé
+  et jaune clair. Tout le fond étant coloré, un objet blanc, gris ou noir ressort partout.
+  L'appli reconnaît seule la planche utilisée. Éviter les objets bleu foncé ou jaunes.
+- **Fond coloré** (case à cocher à l'étape 3) : avec la planche noir et blanc, poser une feuille
+  de couleur vive d'environ 10 x 10 cm au centre, sous l'objet, d'une autre couleur que lui.
+
 ## Limites
 
 - Les creux (intérieur d'un bol, rainure, trou borgne) ne sont pas reconstruits.

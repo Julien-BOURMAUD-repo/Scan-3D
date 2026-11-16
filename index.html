@@ -196,8 +196,10 @@
     <h2 id="t-planche"><span class="num">1</span>Planche de référence</h2>
     <p>Imprimer la planche en taille réelle (100 %, sans ajustement à la page), la coller bien à plat sur un support rigide, puis mesurer la barre de contrôle au pied à coulisse.</p>
     <div class="boutons">
-      <a class="bouton secondaire" href="planche.pdf" download>Télécharger la planche (PDF A4)</a>
+      <a class="bouton" href="planche-couleur.pdf" download>Planche couleur (PDF A4)</a>
+      <a class="bouton secondaire" href="planche.pdf" download>Planche noir et blanc</a>
     </div>
+    <p class="doux" style="margin-top:10px">Planche couleur (imprimante couleur) : conseillée, elle permet de scanner aussi les objets blancs, gris ou noirs. Éviter seulement les objets bleu foncé ou jaunes. L'appli reconnaît toute seule la planche utilisée ; la calibration reste valable d'une planche à l'autre.</p>
     <div class="grille-champs">
       <label class="champ">Barre de contrôle mesurée (mm)
         <input id="r-barre" type="number" inputmode="decimal" step="0.1" min="90" max="110">
@@ -240,7 +242,8 @@
       <li>Objet brillant ou transparent : le matifier (spray, talc).</li>
     </ul>
     <p class="doux">Le détourage compare chaque image au motif connu de la planche. Objet clair, fond assombri sur les vignettes : si la feuille reste claire autour de l'objet, exclure la vue.</p>
-    <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; l'anneau dessiné sur la feuille autour de l'objet se colore au fur et à mesure (extérieur : vues basses, intérieur : vues du dessus). Quand la couverture est suffisante, l'aperçu 3D s'affiche tout seul.</p>
+    <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; l'anneau dessiné sur la feuille autour de l'objet se colore au fur et à mesure (extérieur : vues basses, intérieur : vues du dessus). Quand tout l'anneau est vert, l'aperçu 3D s'affiche tout seul ; le bouton Terminer permet de s'arrêter avant.</p>
+    <label class="case"><input id="r-fond" type="checkbox"> Fond coloré : pour un objet blanc, gris ou noir, poser une feuille de couleur vive (environ 10 x 10 cm, d'une autre couleur que l'objet) au centre de la planche, sous l'objet</label>
     <div class="boutons">
       <button id="photos-direct" class="bouton" type="button" data-bloquable>Prise en direct</button>
       <label id="photos-ajouter" class="bouton secondaire" data-bloquable>
@@ -344,6 +347,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>

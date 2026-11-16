@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '7'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '8'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -87,7 +87,7 @@ async function initSeg() {
 
 /* ---------- Reglages ---------- */
 
-const CHAMPS = { barre: 100, voxel: 0.5, emprise: 100, hauteur: 100, tolerance: 1, lissage: 10, ia: false, modele: '' };
+const CHAMPS = { barre: 100, voxel: 0.5, emprise: 100, hauteur: 100, tolerance: 1, lissage: 10, ia: false, fond: false, modele: '' };
 
 function reglages() {
   const r = {};
@@ -335,7 +335,7 @@ async function detourerVue(vue, ext, cal) {
     const s = await vision.appel('detourer', {
       rgba: ext.rgba, mw: vue.mw, mh: vue.mh, R: vue.R, t: vue.t,
       K: kMasque(cal.K, cal.W, cal.H, vue.mw, vue.mh), dist: cal.dist,
-      emprise: r.emprise / f, hauteur: r.hauteur / f,
+      emprise: r.emprise / f, hauteur: r.hauteur / f, fondColore: r.fond,
     }, [ext.rgba.buffer]);
     masque = s.masque;
   }
@@ -439,7 +439,7 @@ const DIRECT = {
   calibImages: 20,      // images a prendre pour la calibration
   calibCoinsMin: 20,    // coins minimum pour une image de calibration
   calibEcartDeg: 12,    // ecart d'angle minimum entre deux images de calibration
-  couverture: 0.85,     // part des cases du dome a remplir pour terminer automatiquement
+  couverture: 1,        // part des cases a remplir pour terminer automatiquement (sinon bouton Terminer)
 };
 // Dome de prise de vue : anneaux d'elevation (degres) decoupes en cases d'azimut
 const ANNEAUX = [
@@ -740,7 +740,7 @@ function fini(d) {
   return ANNEAUX.every((a, i) => {
     let n = 0;
     for (let b = 0; b < a.n; b++) if (d.cases.has(`${i}-${b}`)) n++;
-    return n >= Math.ceil(a.n * 0.75);
+    return n >= Math.ceil(a.n * DIRECT.couverture);
   });
 }
 
