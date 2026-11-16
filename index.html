@@ -160,8 +160,6 @@
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px; font-size: 0.95rem;
     background: linear-gradient(rgb(0 0 0 / 0.65), transparent);
   }
-  #direct-dome[hidden] { display: none; }
-  #direct-dome { position: absolute; right: 12px; top: calc(52px + env(safe-area-inset-top)); width: 150px; height: 150px; }
   .direct-bas {
     position: absolute; left: 0; right: 0; bottom: 0;
     padding: 24px 16px calc(14px + env(safe-area-inset-bottom));
@@ -216,7 +214,7 @@
       <li>Les mêmes règles s'appliquent ensuite aux photos de l'objet.</li>
     </ul>
     <div id="calib-etat" class="etat"></div>
-    <p class="doux" style="margin-top:10px">En direct : filmer la planche seule en tournant autour, 20 images sont prises automatiquement. La calibration en direct est obligatoire pour le scan en direct.</p>
+    <p class="doux" style="margin-top:10px">En direct : filmer la planche seule en tournant autour. Même anneau de couverture que pour le scan : les images sont prises automatiquement jusqu'à ce que tout l'anneau soit vert. La calibration en direct est obligatoire pour le scan en direct.</p>
     <div class="boutons">
       <button id="calib-direct" class="bouton" type="button" data-bloquable>Calibrer en direct</button>
       <label class="bouton secondaire" data-bloquable>
@@ -335,7 +333,6 @@
     <strong id="direct-titre"></strong>
     <span id="direct-compteur"></span>
   </div>
-  <canvas id="direct-dome" aria-hidden="true"></canvas>
   <div class="direct-bas">
     <div id="direct-consigne" role="status" aria-live="polite"></div>
     <div class="boutons">
@@ -347,6 +344,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=8"></script>
+<script type="module" src="app.js?v=9"></script>
 </body>
 </html>

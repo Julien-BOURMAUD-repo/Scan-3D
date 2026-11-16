@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '8'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '9'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -436,9 +436,8 @@ async function ajouterPhotos(fichiers) {
 const DIRECT = {
   vitesseMax: 120,      // deplacement maximal des coins de la planche dans l'image (px/s) pour prendre une image
   coinsMin: 12,         // coins ChArUco minimum pour une vue d'objet
-  calibImages: 20,      // images a prendre pour la calibration
   calibCoinsMin: 20,    // coins minimum pour une image de calibration
-  calibEcartDeg: 12,    // ecart d'angle minimum entre deux images de calibration
+  calibMin: 8,          // images minimum pour pouvoir calculer la calibration
   couverture: 1,        // part des cases a remplir pour terminer automatiquement (sinon bouton Terminer)
 };
 // Dome de prise de vue : anneaux d'elevation (degres) decoupes en cases d'azimut
@@ -506,14 +505,15 @@ function cameraDirect(d, W, H) {
   return { erreur: `La caméra donne ${W} x ${H}, la calibration a été faite en ${c.largeur} x ${c.hauteur} : refaire la calibration en direct.` };
 }
 
-function consigneScan(d, dir) {
+function consigneCouverture(d, dir) {
+  const quoi = d.mode === 'calib' ? 'la planche' : 'l\'objet';
   const i = ANNEAUX.findIndex((a) => dir.elev >= a.min && dir.elev < a.max);
   const vides = ANNEAUX.map((a, k) => {
     let n = 0;
     for (let b = 0; b < a.n; b++) if (!d.cases.has(`${k}-${b}`)) n++;
     return n;
   });
-  if (vides[i] > 0) return 'Vue déjà prise : continuer à tourner autour de l\'objet';
+  if (vides[i] > 0) return `Vue déjà prise : continuer à tourner autour de ${quoi}`;
   const plusHaut = vides.findIndex((n, k) => k > i && n > 0);
   const plusBas = vides.findIndex((n, k) => k < i && n > 0);
   if (plusBas >= 0) return 'Cet étage est complet : descendre le téléphone';
@@ -522,9 +522,14 @@ function consigneScan(d, dir) {
 }
 
 function evaluer(d, p, t, cam) {
-  if (!p.R || p.n < DIRECT.coinsMin) {
+  const calib = d.mode === 'calib';
+  if (!p.R || p.n < (calib ? DIRECT.calibCoinsMin : DIRECT.coinsMin)) {
     d.precedent = null;
-    return { consigne: 'Planche non détectée : la garder dans le cadre, au moins en partie', niveau: 'alerte' };
+    return {
+      consigne: calib && p.R ? 'Cadrer une plus grande partie de la planche'
+        : 'Planche non détectée : la garder dans le cadre, au moins en partie',
+      niveau: 'alerte',
+    };
   }
   const coins = coinsPlanche().map(([X, Y]) => projeterPoint(cam.K, cam.dist, p.R, p.t, X, Y, 0));
   let vitesse = Infinity;
@@ -536,21 +541,17 @@ function evaluer(d, p, t, cam) {
   d.precedent = { t, coins };
   const direction = directionCamera(p);
   if (vitesse > DIRECT.vitesseMax) return { direction, consigne: 'Stabiliser le téléphone', niveau: '' };
-  if (d.mode === 'scan') {
-    if (p.err > ERREUR_POSE_MAX) return { direction, consigne: 'Image peu nette : stabiliser le téléphone', niveau: 'alerte' };
-    const c = caseDe(direction);
-    if (!c) return { direction, consigne: 'Vue trop rasante : monter le téléphone', niveau: 'alerte' };
-    if (d.cases.has(c)) return { direction, consigne: consigneScan(d, direction), niveau: '' };
-    return { ok: true, direction, cle: c };
+  // En calibration, la distorsion n'est pas encore connue : l'erreur de pose n'est pas un critere
+  if (!calib && p.err > ERREUR_POSE_MAX) {
+    return { direction, consigne: 'Image peu nette : stabiliser le téléphone', niveau: 'alerte' };
   }
-  if (direction.elev < 20) return { direction, consigne: 'Vue trop rasante : monter le téléphone', niveau: 'alerte' };
-  if (p.n < DIRECT.calibCoinsMin) return { direction, consigne: 'Cadrer une plus grande partie de la planche', niveau: 'alerte' };
-  const proche = d.directions.some((u) => (Math.acos(Math.min(1, u[0] * direction.u[0] + u[1] * direction.u[1] + u[2] * direction.u[2])) * 180) / Math.PI < DIRECT.calibEcartDeg);
-  if (proche) return { direction, consigne: 'Changer d\'angle : tourner autour de la planche, plus haut ou plus bas', niveau: '' };
-  return { ok: true, direction };
+  const c = caseDe(direction);
+  if (!c) return { direction, consigne: 'Vue trop rasante : monter le téléphone', niveau: 'alerte' };
+  if (d.cases.has(c)) return { direction, consigne: consigneCouverture(d, direction), niveau: '' };
+  return { ok: true, direction, cle: c };
 }
 
-/* Anneau de couverture pose sur la feuille autour de l'objet : un anneau par etage du dome
+/* Anneau de couverture pose sur la feuille autour du centre de la planche : un anneau par etage
    (exterieur = vues basses, interieur = vues du dessus), un secteur par case d'azimut.
    Le secteur d'une vue est du cote ou se trouvait le telephone. */
 function dessinerAnneau(ctx, d, p, cam, versEcran, courant) {
@@ -617,8 +618,8 @@ function dessinerCalque(d, p, cam, W, H, ok, courant) {
   ctx.lineWidth = 3;
   ctx.strokeStyle = ok ? '#4fd1a5' : 'rgba(255, 255, 255, 0.85)';
   tracer(contour(0, 0, L, Hp));
+  dessinerAnneau(ctx, d, p, cam, ([u, v]) => [ox + u * s, oy + v * s], courant);
   if (d.mode === 'scan') {
-    dessinerAnneau(ctx, d, p, cam, ([u, v]) => [ox + u * s, oy + v * s], courant);
     // Zone de travail : l'objet doit tenir dans ce carre
     const e = reglages().emprise / facteurPlanche() / 2;
     ctx.setLineDash([8, 6]);
@@ -629,64 +630,15 @@ function dessinerCalque(d, p, cam, W, H, ok, courant) {
   }
 }
 
-function dessinerDome(d, courant) {
-  const cnv = $('direct-dome');
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const taille = 150;
-  if (cnv.width !== taille * dpr) { cnv.width = taille * dpr; cnv.height = taille * dpr; }
-  const ctx = cnv.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, taille, taille);
-  const c = taille / 2, R = taille / 2 - 6;
-  const rayon = (e) => (R * (90 - Math.min(90, e))) / 70;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.beginPath(); ctx.arc(c, c, R + 4, 0, 2 * Math.PI); ctx.fill();
-  if (d.mode === 'scan') {
-    ANNEAUX.forEach((a, i) => {
-      const pas = (2 * Math.PI) / a.n;
-      for (let b = 0; b < a.n; b++) {
-        ctx.beginPath();
-        ctx.arc(c, c, rayon(a.min), b * pas, (b + 1) * pas);
-        ctx.arc(c, c, Math.max(0, rayon(a.max)), (b + 1) * pas, b * pas, true);
-        ctx.closePath();
-        ctx.fillStyle = d.cases.has(`${i}-${b}`) ? 'rgba(79, 209, 165, 0.9)' : 'rgba(255, 255, 255, 0.12)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-    });
-  } else {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-    for (const e of [20, 40, 60, 78]) { ctx.beginPath(); ctx.arc(c, c, rayon(e), 0, 2 * Math.PI); ctx.stroke(); }
-    ctx.fillStyle = 'rgba(79, 209, 165, 0.95)';
-    for (const u of d.directions) {
-      const e = (Math.asin(Math.min(1, u[2])) * 180) / Math.PI, a = Math.atan2(u[1], u[0]);
-      ctx.beginPath(); ctx.arc(c + rayon(e) * Math.cos(a), c + rayon(e) * Math.sin(a), 4, 0, 2 * Math.PI); ctx.fill();
-    }
-  }
-  if (courant) {
-    const a = (courant.az * Math.PI) / 180, r = rayon(Math.max(20, courant.elev));
-    ctx.beginPath(); ctx.arc(c + r * Math.cos(a), c + r * Math.sin(a), 6, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ffffff'; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = '#000000'; ctx.stroke();
-  }
-}
-
 function majDirect(d, consigne, niveau) {
   if (consigne !== undefined) {
     $('direct-consigne').textContent = consigne;
     $('direct-consigne').dataset.niveau = niveau || '';
   }
-  if (d.mode === 'calib') {
-    $('direct-compteur').textContent = `${d.prises} / ${DIRECT.calibImages} images`;
-    $('direct-terminer').disabled = d.prises < 8;
-  } else {
-    let txt = `${d.cases.size} / ${NB_CASES} vues`;
-    if (d.enCours) txt += ` - détourage : ${d.enCours} en attente`;
-    $('direct-compteur').textContent = txt;
-    $('direct-terminer').disabled = d.cases.size < MIN_VUES;
-  }
+  let txt = `${d.cases.size} / ${NB_CASES} vues`;
+  if (d.enCours) txt += ` - détourage : ${d.enCours} en attente`;
+  $('direct-compteur').textContent = txt;
+  $('direct-terminer').disabled = d.mode === 'calib' ? d.prises < DIRECT.calibMin : d.cases.size < MIN_VUES;
 }
 
 function signalerPrise() {
@@ -701,7 +653,10 @@ async function prendre(d, p, ev, W, H) {
   signalerPrise();
   if (d.mode === 'calib') {
     const r = await vision.appel('calib-garder');
-    if (r.garde) { d.directions.push(ev.direction.u); d.prises++; d.taille = [W, H]; }
+    if (!r.garde) return;
+    d.cases.add(ev.cle);
+    d.prises++;
+    d.taille = [W, H];
     return;
   }
   d.cases.add(ev.cle);
@@ -733,9 +688,8 @@ async function prendre(d, p, ev, W, H) {
   });
 }
 
-/* Scan termine : couverture globale atteinte et chaque etage du dome (dessus compris) rempli aux trois quarts. */
+/* Termine : couverture globale atteinte et chaque etage de l'anneau (dessus compris) rempli. */
 function fini(d) {
-  if (d.mode === 'calib') return d.prises >= DIRECT.calibImages;
   if (d.cases.size < CASES_VISEES) return false;
   return ANNEAUX.every((a, i) => {
     let n = 0;
@@ -775,7 +729,7 @@ async function ouvrirDirect(mode) {
   video.srcObject = flux;
   const d = {
     mode, flux, video, actif: true, action: 'arreter',
-    cases: new Set(), directions: [], prises: 0, taille: null,
+    cases: new Set(), prises: 0, taille: null,
     precedent: null, file: Promise.resolve(), enCours: 0,
     toile: document.createElement('canvas'), verrou: null,
   };
@@ -788,13 +742,11 @@ async function ouvrirDirect(mode) {
   try { if (navigator.wakeLock) d.verrou = await navigator.wakeLock.request('screen'); } catch (e) { d.verrou = null; }
   $('direct-titre').textContent = mode === 'calib' ? 'Calibration en direct' : 'Scan en direct';
   $('direct-terminer').textContent = mode === 'calib' ? 'Calculer la calibration' : 'Terminer et reconstruire';
-  $('direct-dome').hidden = mode === 'scan'; // en scan, la couverture s'affiche autour de l'objet
   $('direct').hidden = false;
   document.body.classList.add('direct-ouvert');
   majDirect(d, mode === 'calib'
     ? 'Planche seule, sans objet : tourner autour en variant hauteur et distance'
     : 'Tourner lentement autour de l\'objet, les images sont prises automatiquement');
-  dessinerDome(d, null);
   try { await video.play(); } catch (e) { /* lecture relancee par l'utilisateur */ }
   boucleDirect(d);
 }
@@ -824,11 +776,10 @@ async function boucleDirect(d) {
       if (!d.actif) break;
       const ev = evaluer(d, p, t, cam);
       dessinerCalque(d, p, cam, W, H, ev.ok, ev.direction);
-      dessinerDome(d, ev.direction);
       if (ev.ok) {
         await prendre(d, p, ev, W, H);
+        dessinerCalque(d, p, cam, W, H, false, ev.direction);
         majDirect(d, d.mode === 'calib' ? 'Image prise' : 'Vue prise', 'ok');
-        dessinerDome(d, ev.direction);
       } else {
         majDirect(d, ev.consigne, ev.niveau);
       }

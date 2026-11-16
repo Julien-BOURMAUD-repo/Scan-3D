@@ -165,41 +165,47 @@ function resoudre(A, b, n) {
   return M.map((ligne, r) => (M[r][r] ? ligne[n] / M[r][r] : 0));
 }
 
-function teinteDe(r, g, b, c) {
-  const mx = Math.max(r, g, b);
-  const h = mx === r ? ((g - b) / c) % 6 : mx === g ? (b - r) / c + 2 : (r - g) / c + 4;
-  return (h * 60 + 360) % 360;
+/* Couleur typique d'une classe de carres : mediane par canal, insensible a l'objet et aux ombres. */
+function couleurClasse(rgba, net, surPlanche, classe, n) {
+  const h = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    if (net[i] !== classe || !surPlanche[i]) continue;
+    h[0][rgba[4 * i]]++; h[1][rgba[4 * i + 1]]++; h[2][rgba[4 * i + 2]]++;
+    total++;
+  }
+  if (total < 200) return null;
+  const med = h.map((c) => { let k = 0; for (let v = 0; v < 256; v++) { k += c[v]; if (k >= total / 2) return v; } return 255; });
+  const norme = Math.hypot(med[0], med[1], med[2]);
+  if (norme < 12) return null; // carres trop sombres pour avoir une couleur fiable
+  return { med, dir: med.map((v) => v / norme), lum: 0.299 * med[0] + 0.587 * med[1] + 0.114 * med[2] };
 }
 
-/* Detourage sur planche couleur. Retourne null si la planche est en noir et blanc. */
-function detourerCouleur(rgba, chroma, net, dedans, planX, planY, L, Hb, n) {
-  const teinte = new Float32Array(n), vive = new Uint8Array(n), surPlanche = new Uint8Array(n);
-  const histo = [new Float32Array(36), new Float32Array(36)];
-  const total = [0, 0], vives = [0, 0];
-  for (let i = 0; i < n; i++) {
-    if (!(planX[i] >= 0 && planX[i] < L && planY[i] >= 0 && planY[i] < Hb)) continue;
-    surPlanche[i] = 1;
-    const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
-    const mx = Math.max(r, g, b), c = chroma[i];
-    if (mx >= 40 && c >= 0.3 * mx) { vive[i] = 1; teinte[i] = teinteDe(r, g, b, c); }
-    const k = net[i];
-    if (k < 0) continue;
-    total[k]++;
-    if (vive[i]) { vives[k]++; histo[k][Math.floor(teinte[i] / 10) % 36]++; }
-  }
-  if (total[0] < 200 || total[1] < 200 || vives[0] < 0.5 * total[0] || vives[1] < 0.5 * total[1]) return null;
-  const ref = histo.map((h) => {
-    let best = 0, bestV = -1;
-    for (let k = 0; k < 36; k++) { const v = h[(k + 35) % 36] + 2 * h[k] + h[(k + 1) % 36]; if (v > bestV) { bestV = v; best = k; } }
-    return best * 10 + 5;
-  });
+/* Detourage sur planche couleur : un pixel est du fond si sa COULEUR (direction RVB) est celle
+   attendue a cet endroit, quelle que soit sa luminosite. Les ombres et l'exposition ne changent
+   que la luminosite, donc ne genent pas ; un objet blanc, gris ou noir sur un carre colore a une
+   direction differente et ressort. Retourne null si la planche n'est pas en couleur. */
+function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, n, sinMin) {
+  const cl = [couleurClasse(rgba, net, surPlanche, 0, n), couleurClasse(rgba, net, surPlanche, 1, n)];
+  if (!cl[0] || !cl[1]) return null;
+  const ecartDir = Math.hypot(...cl[0].dir.map((v, k) => v - cl[1].dir[k]));
+  const gris = (c) => Math.hypot(...c.dir.map((v) => v - 0.5773502692));
+  if (ecartDir < 0.12 && Math.max(gris(cl[0]), gris(cl[1])) < 0.1) return null; // planche noir et blanc
+  // Ecart de teinte mesure comme un angle : un objet noir comme un objet blanc s'ecartent de la
+  // couleur du carre, alors que leur ecart absolu en niveaux est tres different.
+  const plancher = Math.max(5, 0.03 * Math.max(cl[0].lum, cl[1].lum));
   const masque = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     if (!dedans[i]) continue;
+    if (!surPlanche[i]) { masque[i] = hullConnu ? 1 : 2; continue; } // dans le volume, hors planche : objet
     const k = net[i];
-    if (k < 0 || !surPlanche[i]) { masque[i] = 2; continue; }
-    const ecart = Math.abs(((teinte[i] - ref[k] + 540) % 360) - 180);
-    masque[i] = vive[i] && ecart <= 30 ? 0 : 1;
+    if (k < 0) { masque[i] = 2; continue; }
+    const d = cl[k].dir;
+    const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
+    const proj = r * d[0] + g * d[1] + b * d[2];
+    const res = Math.hypot(r - proj * d[0], g - proj * d[1], b - proj * d[2]);
+    const norme = Math.hypot(r, g, b);
+    masque[i] = res > plancher && res > sinMin * norme ? 1 : 0;
   }
   return masque;
 }
@@ -354,9 +360,12 @@ function detourer(m) {
     for (const d of [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1]) if (cls[i + d] !== c) { net[i] = -1; break; }
   }
 
-  // Planche couleur (bleu fonce / jaune clair) : reconnue toute seule quand les deux classes de carres
-  // sont vivement colorees. Un pixel qui n'a pas la teinte attendue est l'objet, meme blanc, gris ou noir.
-  const couleur = detourerCouleur(rgba, chroma, net, dedans, planX, planY, L, Hb, n);
+  // Planche couleur : reconnue toute seule a la couleur des carres, meme sur une impression sombre
+  const surPlanche = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (planX[i] >= 0 && planX[i] < L && planY[i] >= 0 && planY[i] < Hb) surPlanche[i] = 1;
+  }
+  const couleur = detourerCouleur(rgba, net, dedans, surPlanche, !!env, n, 0.19);
   if (couleur) return finirMasque(couleur, dedans, mw, mh, { sombre: false, colore: false, planche: 'couleur' });
 
   // Niveaux du blanc et du noir de la feuille, selon l'eclairage
@@ -386,8 +395,11 @@ function detourer(m) {
       if (colore || lum[i] > Bk + 0.15 * ecart) masque[i] = 1;
       else if (lum[i] < Bk + 0.07 * ecart) masque[i] = 0;
       else masque[i] = 3;
+    } else if (colore) {
+      masque[i] = 1;
     } else {
-      masque[i] = colore ? 1 : 2;
+      // Rayon qui manque la feuille : dans le volume de travail, c'est l'objet (objet haut vu de biais)
+      masque[i] = cls[i] === -1 && env ? 1 : 2;
     }
   }
   // Objet tres sombre : il se confond avec le noir imprime, la zone ambigue reste alors indeterminee

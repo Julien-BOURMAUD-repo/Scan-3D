@@ -38,8 +38,10 @@ fichiers pendant quelques minutes.
 ## Détourage
 
 L'objet est séparé du fond en comparant chaque image au motif connu de la planche : grâce à la
-pose, l'appli sait quel carré noir ou blanc devrait apparaître à chaque pixel. Ce qui ne
-correspond pas est l'objet. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
+pose, l'appli sait quel carré devrait apparaître à chaque pixel. Ce qui ne correspond pas est
+l'objet. Sur la planche couleur, la comparaison porte sur la teinte et non sur la luminosité :
+une impression sombre, une pièce mal éclairée ou une ombre portée ne gênent pas, et un objet
+blanc, gris ou noir ressort quand même. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
 noir) restent indéterminés et ne retirent rien du volume. Sur les vignettes : objet clair, fond
 assombri, zones indéterminées à peine assombries.
 
@@ -75,7 +77,8 @@ avancés, mais il a tendance à prendre toute la feuille pour l'objet.
 Les étapes 2 et 3 peuvent se faire caméra ouverte, sans passer par l'appareil photo :
 
 - **Calibrer en direct** : filmer la planche seule en tournant autour, en variant hauteur et
-  distance. 20 images sont prises automatiquement, puis la calibration est calculée.
+  distance. Même anneau de couverture que pour le scan : les images sont prises automatiquement
+  jusqu'à ce que tout l'anneau soit vert, puis la calibration est calculée.
 - **Prise en direct** : tourner lentement autour de l'objet. Une vue est prise dès que le
   téléphone est stable sur un angle pas encore couvert. Un anneau dessiné sur la feuille autour
   de l'objet montre la couverture sur 360 degrés : un secteur se colore en vert quand la vue
@@ -98,7 +101,8 @@ Sur la planche noir et blanc, un objet sans couleur se confond avec le damier. D
 
 - **Planche couleur** (`planche-couleur.pdf`, imprimante couleur) : mêmes marqueurs, en bleu foncé
   et jaune clair. Tout le fond étant coloré, un objet blanc, gris ou noir ressort partout.
-  L'appli reconnaît seule la planche utilisée. Éviter les objets bleu foncé ou jaunes.
+  L'appli reconnaît seule la planche utilisée, même si l'impression ressort sombre.
+  Éviter seulement les objets bleu foncé ou jaunes, de la teinte des carrés.
 - **Fond coloré** (case à cocher à l'étape 3) : avec la planche noir et blanc, poser une feuille
   de couleur vive d'environ 10 x 10 cm au centre, sous l'objet, d'une autre couleur que lui.
 
