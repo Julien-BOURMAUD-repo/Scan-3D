@@ -200,13 +200,20 @@ function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, mw, mh, sinMi
   // varie d'un bout a l'autre de la feuille, ce qui deplace la teinte. Une couleur de reference
   // unique ne suffit donc pas : on ajuste pour chaque classe un modele de couleur qui varie
   // doucement dans l'image (polynome de degre 2 par canal), cale sur la planche elle-meme.
-  const loc = refLocales(rgba, net, surPlanche, mw, mh, [cl[0].dir, cl[1].dir]);
+  // References affinees par etapes : on part de la couleur d'ensemble avec un tri strict (l'objet,
+  // meme gris, est ecarte), puis chaque etape repart de la reference locale precedente, ce qui
+  // permet de suivre le voile du papier de proche en proche sans jamais absorber l'objet.
+  let loc = refLocales(rgba, net, surPlanche, mw, mh, (k, u, v, o) => { o[0] = cl[k].dir[0]; o[1] = cl[k].dir[1]; o[2] = cl[k].dir[2]; }, 0.15);
+  for (let etape = 0; etape < 3; etape++) {
+    const prec = loc;
+    loc = refLocales(rgba, net, surPlanche, mw, mh, (k, u, v, o) => refEn(prec, k, u, v, o), 0.15);
+  }
   const masque = new Uint8Array(n);
   const att = [0, 0, 0];
   for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
     const i = v * mw + u;
     if (!dedans[i]) continue;
-    if (!surPlanche[i]) { masque[i] = hullConnu ? 1 : 2; continue; } // dans le volume, hors planche : objet
+    if (!surPlanche[i]) { masque[i] = hullConnu ? 6 : 2; continue; } // hors planche : tranche dans finirMasque
     if (net[i] < 0) { masque[i] = 2; continue; } // bord de carre : melange des deux couleurs
     const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
     if (r >= 250 || g >= 250 || b >= 250) { masque[i] = 2; continue; } // surexpose : couleur faussee
@@ -237,7 +244,8 @@ const CELLULE = 48; // cote d'une cellule de reference locale, en pixels du masq
    imprime renvoie un voile de lumiere qui s'ajoute aux couleurs et varie d'un endroit a l'autre
    de la feuille : une reference locale le suit, la ou une couleur d'ensemble se trompe.
    Les cellules sans mesure (cachees par l'objet) heritent de leurs voisines. */
-function refLocales(rgba, net, surPlanche, mw, mh, dirGlob) {
+function refLocales(rgba, net, surPlanche, mw, mh, refCourante, rejet) {
+  const att = [0, 0, 0];
   const gw = Math.ceil(mw / CELLULE), gh = Math.ceil(mh / CELLULE), ng = gw * gh;
   const ref = [0, 1].map(() => ({ c: new Float32Array(ng * 3), n: new Int32Array(ng) }));
   for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
@@ -245,7 +253,8 @@ function refLocales(rgba, net, surPlanche, mw, mh, dirGlob) {
     if (k < 0 || !surPlanche[i]) continue;
     const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
     if (r >= 250 || g >= 250 || b >= 250) continue;
-    if (residuPerp(r, g, b, dirGlob[k]) > 0.28 * Math.hypot(r, g, b)) continue; // objet : ecarte
+    refCourante(k, u, v, att);
+    if (residuPerp(r, g, b, att) > rejet * Math.hypot(r, g, b)) continue; // objet : ecarte
     const c = ((v / CELLULE) | 0) * gw + ((u / CELLULE) | 0), a = ref[k];
     a.c[3 * c] += r; a.c[3 * c + 1] += g; a.c[3 * c + 2] += b;
     a.n[c]++;
@@ -289,9 +298,44 @@ function refEn(loc, k, u, v, sortie) {
   }
 }
 
-/* Fin commune du detourage : filtrage des detections fines, protection des trous, comptage. */
-function finirMasque(masque, dedans, mw, mh, infos) {
+/* Pixels dont le rayon manque la feuille (code 6). Ce n'est en general que la table : du fond,
+   ce qui permet de retirer le volume a cet endroit. Exception : un objet haut, vu de biais, qui
+   depasse du bord de la feuille. Ce prolongement touche l'objet vu sur la planche et en a la
+   couleur : on le retrouve en partant de l'objet, de proche en proche. */
+function resoudreHorsFeuille(masque, rgba, mw, mh) {
   const n = mw * mh;
+  let present = false;
+  for (let i = 0; i < n; i++) if (masque[i] === 6) { present = true; break; }
+  if (!present) return;
+  const h = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    if (masque[i] !== 1) continue;
+    h[0][rgba[4 * i]]++; h[1][rgba[4 * i + 1]]++; h[2][rgba[4 * i + 2]]++;
+    total++;
+  }
+  if (total >= 50) {
+    const med = h.map((c) => { let k = 0; for (let v = 0; v < 256; v++) { k += c[v]; if (k >= total / 2) return v; } return 255; });
+    const tol = 0.3 * Math.hypot(med[0], med[1], med[2]) + 20;
+    const file = new Int32Array(n);
+    let tete = 0, queue = 0;
+    for (let i = 0; i < n; i++) if (masque[i] === 1) file[queue++] = i;
+    while (tete < queue) {
+      const i = file[tete++], u = i % mw;
+      for (const j of [u > 0 ? i - 1 : -1, u < mw - 1 ? i + 1 : -1, i - mw, i + mw]) {
+        if (j < 0 || j >= n || masque[j] !== 6) continue;
+        const dr = rgba[4 * j] - med[0], dg = rgba[4 * j + 1] - med[1], db = rgba[4 * j + 2] - med[2];
+        if (Math.hypot(dr, dg, db) < tol) { masque[j] = 1; file[queue++] = j; }
+      }
+    }
+  }
+  for (let i = 0; i < n; i++) if (masque[i] === 6) masque[i] = 0;
+}
+
+/* Fin commune du detourage : filtrage des detections fines, protection des trous, comptage. */
+function finirMasque(masque, dedans, mw, mh, infos, rgba) {
+  const n = mw * mh;
+  resoudreHorsFeuille(masque, rgba, mw, mh);
   let zone = 0;
   for (let i = 0; i < n; i++) if (dedans[i]) zone++;
   // Detections de moins de 3 px d'epaisseur (bords de carres decales quand la feuille n'est pas
@@ -447,7 +491,7 @@ function detourer(m) {
     if (planX[i] >= 0 && planX[i] < L && planY[i] >= 0 && planY[i] < Hb) surPlanche[i] = 1;
   }
   const couleur = detourerCouleur(rgba, net, dedans, surPlanche, !!env, mw, mh, 0.19);
-  if (couleur) return finirMasque(couleur, dedans, mw, mh, { sombre: false, colore: false, planche: 'couleur' });
+  if (couleur) return finirMasque(couleur, dedans, mw, mh, { sombre: false, colore: false, planche: 'couleur' }, rgba);
 
   // Niveaux du blanc et du noir de la feuille, selon l'eclairage
   const blanc = ajusterNiveau(lum, net, 1, mw, mh, (l, f) => l > f * 0.85);
@@ -476,11 +520,12 @@ function detourer(m) {
       if (colore || lum[i] > Bk + 0.15 * ecart) masque[i] = 1;
       else if (lum[i] < Bk + 0.07 * ecart) masque[i] = 0;
       else masque[i] = 3;
+    } else if (cls[i] === -1) {
+      masque[i] = env ? 6 : 2; // hors feuille : tranche dans finirMasque
     } else if (colore) {
       masque[i] = 1;
     } else {
-      // Rayon qui manque la feuille : dans le volume de travail, c'est l'objet (objet haut vu de biais)
-      masque[i] = cls[i] === -1 && env ? 1 : 2;
+      masque[i] = 2;
     }
   }
   // Objet tres sombre : il se confond avec le noir imprime, la zone ambigue reste alors indeterminee
@@ -494,7 +539,7 @@ function detourer(m) {
   if (objetColore) {
     const seuil = Math.max(0.25, 0.4 * colores[colores.length >> 1]);
     for (let i = 0; i < n; i++) {
-      if (!dedans[i] || masque[i] === 0 || masque[i] === 4) continue;
+      if (!dedans[i] || masque[i] === 0 || masque[i] === 4 || masque[i] === 6) continue;
       if (chroma[i] > seuil * blancPix[i]) masque[i] = 1;
       else masque[i] = net[i] === -1 ? 2 : 0;
     }
@@ -503,7 +548,7 @@ function detourer(m) {
   }
 
   for (let i = 0; i < n; i++) if (masque[i] === 4) masque[i] = 1;
-  return finirMasque(masque, dedans, mw, mh, { sombre: objetSombre, colore: objetColore, planche: 'noir et blanc' });
+  return finirMasque(masque, dedans, mw, mh, { sombre: objetSombre, colore: objetColore, planche: 'noir et blanc' }, rgba);
 }
 
 function calibrer(w, h) {

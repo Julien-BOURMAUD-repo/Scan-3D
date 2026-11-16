@@ -50,7 +50,12 @@ impression sombre, une pièce mal éclairée ou une ombre portée ne gênent pas
 gris ou noir ressort quand même. Le papier imprimé étant brillant, il renvoie un voile de
 lumière qui s'ajoute aux couleurs et varie d'un endroit à l'autre de la feuille ; la couleur de
 référence est donc mesurée localement, sur une grille de cellules interpolées entre elles, et
-non une fois pour toute l'image. Les cellules cachées par l'objet héritent de leurs voisines. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
+non une fois pour toute l'image. Les cellules cachées par l'objet héritent de leurs voisines.
+
+Ce qui tombe hors de la feuille dans l'image (la table) est traité comme du fond, sauf quand il
+prolonge l'objet visible sur la planche avec la même couleur (objet haut, vu de biais, qui dépasse
+du bord). En photographiant de près, le volume de travail déborde largement de la feuille : c'est
+ce qui permet quand même de le sculpter. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
 noir) restent indéterminés et ne retirent rien du volume. Sur les vignettes : objet clair, fond
 assombri, zones indéterminées à peine assombries.
 
@@ -91,7 +96,7 @@ Les étapes 2 et 3 peuvent se faire caméra ouverte, sans passer par l'appareil 
 - **Prise en direct** : tourner lentement autour de l'objet. Une vue est prise dès que le
   téléphone est stable sur un angle pas encore couvert. Un anneau dessiné sur la feuille autour
   de l'objet montre la couverture sur 360 degrés : un secteur se colore en vert quand la vue
-  prise de ce côté est faite. Anneau extérieur : vues basses ; anneaux suivants : vues de plus
+  prise de ce côté est faite. Anneau extérieur : vues rasantes (15 à 22 degrés, téléphone presque au ras de la table), indispensables pour bien tailler le dessus des objets plats ; anneaux suivants : vues de plus
   en plus hautes ; anneau intérieur : vues du dessus. Le secteur où se trouve le téléphone est
   entouré de blanc.
   Le cadre en pointillés est la zone de travail : l'objet doit tenir dedans. Quand chaque étage

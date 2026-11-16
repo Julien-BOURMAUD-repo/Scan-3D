@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '11'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '13'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -445,8 +445,11 @@ const DIRECT = {
   couverture: 1,        // part des cases a remplir pour terminer automatiquement (sinon bouton Terminer)
 };
 // Dome de prise de vue : anneaux d'elevation (degres) decoupes en cases d'azimut
+// L'etage rasant (15-22 degres) est celui qui taille le dessus des objets plats : sans lui,
+// la hauteur ressort nettement surestimee. Plus bas, la planche n'est plus detectee.
 const ANNEAUX = [
-  { min: 20, max: 40, n: 16 },
+  { min: 15, max: 22, n: 8 },
+  { min: 22, max: 40, n: 16 },
   { min: 40, max: 60, n: 16 },
   { min: 60, max: 78, n: 12 },
   { min: 78, max: 90.01, n: 4 },
