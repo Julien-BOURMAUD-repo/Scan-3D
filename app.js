@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '9'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '10'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -325,7 +325,7 @@ function extraire(source, mw, mh) {
 
 /* Detourage d'une vue deja posee : par comparaison avec le motif de la planche, ou par le modele IA en option. */
 async function detourerVue(vue, ext, cal) {
-  let masque;
+  let masque, zone = 0, planche = 'IA';
   if (ext.rgbaIA) {
     await initSeg();
     const s = await seg.appel('segmenter', { rgba: ext.rgbaIA, S: TAILLE_SEG, mw: vue.mw, mh: vue.mh }, [ext.rgbaIA.buffer]);
@@ -337,21 +337,25 @@ async function detourerVue(vue, ext, cal) {
       K: kMasque(cal.K, cal.W, cal.H, vue.mw, vue.mh), dist: cal.dist,
       emprise: r.emprise / f, hauteur: r.hauteur / f, fondColore: r.fond,
     }, [ext.rgba.buffer]);
-    masque = s.masque;
+    masque = s.masque; zone = s.zone; planche = s.planche;
   }
   vue.masque = masque;
+  vue.planche = planche;
   dessinerMasque(vue);
   let surface = 0;
   for (let k = 0; k < masque.length; k++) if (masque[k] === 1) surface++;
   if (surface < masque.length * 0.001) throw new Error('Objet non détouré');
+  // Detourage aberrant (planche prise pour l'objet) : la vue ne retirerait rien et fausserait tout
+  if (zone && surface > 0.85 * zone) throw new Error("Détourage aberrant : la planche est prise pour l'objet");
 }
 
 function majResume() {
   const total = etat.vues.length;
   const ok = etat.vues.filter((v) => v.etat === 'ok').length;
   const actives = etat.vues.filter((v) => v.etat === 'ok' && v.actif).length;
+  const pl = etat.vues.find((v) => v.planche);
   $('photos-resume').textContent = total
-    ? `${total} photos, ${ok} exploitables, ${actives} retenues. L'objet détouré reste clair, le fond est assombri : toucher une vignette pour l'exclure si le détourage est faux.`
+    ? `${total} photos, ${ok} exploitables, ${actives} retenues.${pl ? ` Planche reconnue : ${pl.planche}.` : ''} L'objet détouré reste clair, le fond est assombri : toucher une vignette pour l'exclure si le détourage est faux.`
     : '';
   majBoutons();
 }

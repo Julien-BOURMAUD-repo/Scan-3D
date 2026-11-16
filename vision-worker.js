@@ -181,10 +181,11 @@ function couleurClasse(rgba, net, surPlanche, classe, n) {
   return { med, dir: med.map((v) => v / norme), lum: 0.299 * med[0] + 0.587 * med[1] + 0.114 * med[2] };
 }
 
-/* Detourage sur planche couleur : un pixel est du fond si sa COULEUR (direction RVB) est celle
-   attendue a cet endroit, quelle que soit sa luminosite. Les ombres et l'exposition ne changent
-   que la luminosite, donc ne genent pas ; un objet blanc, gris ou noir sur un carre colore a une
-   direction differente et ressort. Retourne null si la planche n'est pas en couleur. */
+/* Detourage sur planche couleur : la planche n'a que deux couleurs. Un pixel est du fond si sa
+   COULEUR (direction RVB) est celle de l'une OU l'autre, sans qu'il faille savoir laquelle est
+   attendue a cet endroit : le detourage ne depend donc pas de la precision de la pose. La
+   luminosite n'entre pas en compte, donc ombres, exposition et impression sombre ne genent pas ;
+   un objet blanc, gris ou noir ressort. Retourne null si la planche n'est pas en couleur. */
 function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, n, sinMin) {
   const cl = [couleurClasse(rgba, net, surPlanche, 0, n), couleurClasse(rgba, net, surPlanche, 1, n)];
   if (!cl[0] || !cl[1]) return null;
@@ -198,12 +199,16 @@ function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, n, sinMin) {
   for (let i = 0; i < n; i++) {
     if (!dedans[i]) continue;
     if (!surPlanche[i]) { masque[i] = hullConnu ? 1 : 2; continue; } // dans le volume, hors planche : objet
-    const k = net[i];
-    if (k < 0) { masque[i] = 2; continue; }
-    const d = cl[k].dir;
+    if (net[i] < 0) { masque[i] = 2; continue; } // bord de carre : melange des deux couleurs
     const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
-    const proj = r * d[0] + g * d[1] + b * d[2];
-    const res = Math.hypot(r - proj * d[0], g - proj * d[1], b - proj * d[2]);
+    if (r >= 250 || g >= 250 || b >= 250) { masque[i] = 2; continue; } // surexpose : couleur faussee
+    let res = Infinity;
+    for (const c of cl) {
+      const d = c.dir;
+      const proj = r * d[0] + g * d[1] + b * d[2];
+      const e = Math.hypot(r - proj * d[0], g - proj * d[1], b - proj * d[2]);
+      if (e < res) res = e;
+    }
     const norme = Math.hypot(r, g, b);
     masque[i] = res > plancher && res > sinMin * norme ? 1 : 0;
   }
@@ -213,6 +218,8 @@ function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, n, sinMin) {
 /* Fin commune du detourage : filtrage des detections fines, protection des trous, comptage. */
 function finirMasque(masque, dedans, mw, mh, infos) {
   const n = mw * mh;
+  let zone = 0;
+  for (let i = 0; i < n; i++) if (dedans[i]) zone++;
   // Detections de moins de 3 px d'epaisseur (bords de carres decales quand la feuille n'est pas
   // tout a fait plane) : indeterminees. Ouverture morphologique 3 x 3 : les vrais objets restent entiers.
   const huit = [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1];
@@ -251,7 +258,7 @@ function finirMasque(masque, dedans, mw, mh, infos) {
     if (masque[i] === 0 && !relie[i]) masque[i] = 2;
     if (masque[i] === 1) objet++;
   }
-  return { masque, objet, ...infos };
+  return { masque, objet, zone, ...infos };
 }
 
 function detourer(m) {

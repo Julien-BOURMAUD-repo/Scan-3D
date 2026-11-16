@@ -31,9 +31,13 @@ ouvrir `http://localhost:8000` (ouvrir `index.html` directement depuis l'explora
 Les bibliothèques sont chargées depuis cdn.jsdelivr.net (OpenCV.js 5.0, three.js 0.160, et
 ONNX Runtime Web 1.22 si l'option IA est activée), puis gardées en cache par le navigateur.
 
-Après chaque mise à jour des fichiers, augmenter `VERSION` en haut de `app.js` et le `?v=` de
-`app.js` dans `index.html` (même valeur) : sinon le navigateur peut mélanger anciens et nouveaux
-fichiers pendant quelques minutes.
+Après chaque mise à jour des fichiers, augmenter `VERSION` en haut de `app.js`, le `?v=` de
+`app.js` dans `index.html` et le numéro affiché en bas de page (même valeur) : sinon le navigateur
+peut mélanger anciens et nouveaux fichiers.
+
+Le numéro de version s'affiche en bas de la page. S'il ne correspond pas après une mise à jour,
+le navigateur sert encore l'ancienne version : GitHub Pages garde les fichiers environ 10 minutes
+en cache, et le navigateur plus longtemps. Recharger en navigation privée pour vérifier.
 
 ## Détourage
 
@@ -98,6 +102,9 @@ reste un peu plus précis.
 ## Objets blancs, gris ou noirs
 
 Sur la planche noir et blanc, un objet sans couleur se confond avec le damier. Deux solutions :
+
+Le type de planche reconnu est indiqué dans le résumé de l'étape 3 ("Planche reconnue : couleur"
+ou "noir et blanc").
 
 - **Planche couleur** (`planche-couleur.pdf`, imprimante couleur) : mêmes marqueurs, en bleu foncé
   et jaune clair. Tout le fond étant coloré, un objet blanc, gris ou noir ressort partout.
