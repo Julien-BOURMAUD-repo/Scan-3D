@@ -43,9 +43,14 @@ en cache, et le navigateur plus longtemps. Recharger en navigation privée pour 
 
 L'objet est séparé du fond en comparant chaque image au motif connu de la planche : grâce à la
 pose, l'appli sait quel carré devrait apparaître à chaque pixel. Ce qui ne correspond pas est
-l'objet. Sur la planche couleur, la comparaison porte sur la teinte et non sur la luminosité :
-une impression sombre, une pièce mal éclairée ou une ombre portée ne gênent pas, et un objet
-blanc, gris ou noir ressort quand même. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
+l'objet.
+
+Sur la planche couleur, la comparaison porte sur la teinte et non sur la luminosité : une
+impression sombre, une pièce mal éclairée ou une ombre portée ne gênent pas, et un objet blanc,
+gris ou noir ressort quand même. Le papier imprimé étant brillant, il renvoie un voile de
+lumière qui s'ajoute aux couleurs et varie d'un endroit à l'autre de la feuille ; la couleur de
+référence est donc mesurée localement, sur une grille de cellules interpolées entre elles, et
+non une fois pour toute l'image. Les cellules cachées par l'objet héritent de leurs voisines. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
 noir) restent indéterminés et ne retirent rien du volume. Sur les vignettes : objet clair, fond
 assombri, zones indéterminées à peine assombries.
 
@@ -117,6 +122,7 @@ ou "noir et blanc").
 
 - Les creux (intérieur d'un bol, rainure, trou borgne) ne sont pas reconstruits.
 - Les dimensions brutes sont en général 2 à 5 % trop grandes : corriger avec une cote mesurée.
+- Un papier mat donne un détourage plus net qu'un papier brillant, qui renvoie des reflets.
 - Objets brillants, transparents, blancs ou noir profond : détourage peu fiable (un objet blanc
   se confond avec le papier, un objet noir avec l'encre). Un gris, même foncé, ou une couleur
   passent bien.

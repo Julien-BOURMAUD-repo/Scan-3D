@@ -186,7 +186,8 @@ function couleurClasse(rgba, net, surPlanche, classe, n) {
    attendue a cet endroit : le detourage ne depend donc pas de la precision de la pose. La
    luminosite n'entre pas en compte, donc ombres, exposition et impression sombre ne genent pas ;
    un objet blanc, gris ou noir ressort. Retourne null si la planche n'est pas en couleur. */
-function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, n, sinMin) {
+function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, mw, mh, sinMin) {
+  const n = mw * mh;
   const cl = [couleurClasse(rgba, net, surPlanche, 0, n), couleurClasse(rgba, net, surPlanche, 1, n)];
   if (!cl[0] || !cl[1]) return null;
   const ecartDir = Math.hypot(...cl[0].dir.map((v, k) => v - cl[1].dir[k]));
@@ -195,24 +196,97 @@ function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, n, sinMin) {
   // Ecart de teinte mesure comme un angle : un objet noir comme un objet blanc s'ecartent de la
   // couleur du carre, alors que leur ecart absolu en niveaux est tres different.
   const plancher = Math.max(5, 0.03 * Math.max(cl[0].lum, cl[1].lum));
+  // Le papier imprime est brillant : il renvoie un voile de lumiere qui s'AJOUTE aux couleurs et
+  // varie d'un bout a l'autre de la feuille, ce qui deplace la teinte. Une couleur de reference
+  // unique ne suffit donc pas : on ajuste pour chaque classe un modele de couleur qui varie
+  // doucement dans l'image (polynome de degre 2 par canal), cale sur la planche elle-meme.
+  const loc = refLocales(rgba, net, surPlanche, mw, mh, [cl[0].dir, cl[1].dir]);
   const masque = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
+  const att = [0, 0, 0];
+  for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
+    const i = v * mw + u;
     if (!dedans[i]) continue;
     if (!surPlanche[i]) { masque[i] = hullConnu ? 1 : 2; continue; } // dans le volume, hors planche : objet
     if (net[i] < 0) { masque[i] = 2; continue; } // bord de carre : melange des deux couleurs
     const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
     if (r >= 250 || g >= 250 || b >= 250) { masque[i] = 2; continue; } // surexpose : couleur faussee
     let res = Infinity;
-    for (const c of cl) {
-      const d = c.dir;
-      const proj = r * d[0] + g * d[1] + b * d[2];
-      const e = Math.hypot(r - proj * d[0], g - proj * d[1], b - proj * d[2]);
+    for (let k = 0; k < 2; k++) {
+      refEn(loc, k, u, v, att);
+      const e = residuPerp(r, g, b, att);
       if (e < res) res = e;
     }
     const norme = Math.hypot(r, g, b);
     masque[i] = res > plancher && res > sinMin * norme ? 1 : 0;
   }
   return masque;
+}
+
+/* Ecart de couleur a une teinte de reference : distance du point RVB a la droite portee par
+   cette teinte, donc independante de la luminosite (ombre, exposition). */
+function residuPerp(r, g, b, ref) {
+  const nr = Math.hypot(ref[0], ref[1], ref[2]) || 1;
+  const d0 = ref[0] / nr, d1 = ref[1] / nr, d2 = ref[2] / nr;
+  const proj = r * d0 + g * d1 + b * d2;
+  return Math.hypot(r - proj * d0, g - proj * d1, b - proj * d2);
+}
+
+const CELLULE = 48; // cote d'une cellule de reference locale, en pixels du masque
+
+/* Couleur de reference de chaque classe de carres, mesuree cellule par cellule. Le papier
+   imprime renvoie un voile de lumiere qui s'ajoute aux couleurs et varie d'un endroit a l'autre
+   de la feuille : une reference locale le suit, la ou une couleur d'ensemble se trompe.
+   Les cellules sans mesure (cachees par l'objet) heritent de leurs voisines. */
+function refLocales(rgba, net, surPlanche, mw, mh, dirGlob) {
+  const gw = Math.ceil(mw / CELLULE), gh = Math.ceil(mh / CELLULE), ng = gw * gh;
+  const ref = [0, 1].map(() => ({ c: new Float32Array(ng * 3), n: new Int32Array(ng) }));
+  for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
+    const i = v * mw + u, k = net[i];
+    if (k < 0 || !surPlanche[i]) continue;
+    const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
+    if (r >= 250 || g >= 250 || b >= 250) continue;
+    if (residuPerp(r, g, b, dirGlob[k]) > 0.28 * Math.hypot(r, g, b)) continue; // objet : ecarte
+    const c = ((v / CELLULE) | 0) * gw + ((u / CELLULE) | 0), a = ref[k];
+    a.c[3 * c] += r; a.c[3 * c + 1] += g; a.c[3 * c + 2] += b;
+    a.n[c]++;
+  }
+  for (const a of ref) {
+    for (let c = 0; c < ng; c++) {
+      if (a.n[c] >= 25) { a.c[3 * c] /= a.n[c]; a.c[3 * c + 1] /= a.n[c]; a.c[3 * c + 2] /= a.n[c]; a.n[c] = 1; }
+      else { a.n[c] = 0; }
+    }
+    // Cellules sans mesure : moyenne des voisines deja connues, de proche en proche
+    for (let tour = 0; tour < gw + gh; tour++) {
+      let reste = 0;
+      const copie = a.n.slice();
+      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+        const c = j * gw + i;
+        if (copie[c]) continue;
+        let sr = 0, sg = 0, sb = 0, m = 0;
+        for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const q = (j + dj) * gw + (i + di);
+          if (i + di < 0 || i + di >= gw || j + dj < 0 || j + dj >= gh || !copie[q]) continue;
+          sr += a.c[3 * q]; sg += a.c[3 * q + 1]; sb += a.c[3 * q + 2]; m++;
+        }
+        if (m) { a.c[3 * c] = sr / m; a.c[3 * c + 1] = sg / m; a.c[3 * c + 2] = sb / m; a.n[c] = 1; }
+        else reste++;
+      }
+      if (!reste) break;
+    }
+  }
+  return { ref, gw, gh };
+}
+
+/* Reference de la classe k au pixel (u, v), interpolee entre les cellules voisines. */
+function refEn(loc, k, u, v, sortie) {
+  const { ref, gw, gh } = loc;
+  const x = Math.min(gw - 1, Math.max(0, u / CELLULE - 0.5)), y = Math.min(gh - 1, Math.max(0, v / CELLULE - 0.5));
+  const i0 = x | 0, j0 = y | 0, i1 = Math.min(gw - 1, i0 + 1), j1 = Math.min(gh - 1, j0 + 1);
+  const ax = x - i0, ay = y - j0, a = ref[k];
+  for (let c = 0; c < 3; c++) {
+    sortie[c] = (a.c[3 * (j0 * gw + i0) + c] * (1 - ax) + a.c[3 * (j0 * gw + i1) + c] * ax) * (1 - ay)
+              + (a.c[3 * (j1 * gw + i0) + c] * (1 - ax) + a.c[3 * (j1 * gw + i1) + c] * ax) * ay;
+  }
 }
 
 /* Fin commune du detourage : filtrage des detections fines, protection des trous, comptage. */
@@ -372,7 +446,7 @@ function detourer(m) {
   for (let i = 0; i < n; i++) {
     if (planX[i] >= 0 && planX[i] < L && planY[i] >= 0 && planY[i] < Hb) surPlanche[i] = 1;
   }
-  const couleur = detourerCouleur(rgba, net, dedans, surPlanche, !!env, n, 0.19);
+  const couleur = detourerCouleur(rgba, net, dedans, surPlanche, !!env, mw, mh, 0.19);
   if (couleur) return finirMasque(couleur, dedans, mw, mh, { sombre: false, colore: false, planche: 'couleur' });
 
   // Niveaux du blanc et du noir de la feuille, selon l'eclairage
