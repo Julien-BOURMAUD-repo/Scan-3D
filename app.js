@@ -11,6 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
+const VERSION = '4'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -32,7 +33,7 @@ const etat = {
 /* ---------- Workers ---------- */
 
 function creerWorker(url) {
-  const w = new Worker(url);
+  const w = new Worker(`${url}?v=${VERSION}`);
   let n = 0;
   const attente = new Map();
   const api = { surProgres: null };
@@ -86,13 +87,15 @@ async function initSeg() {
 
 /* ---------- Reglages ---------- */
 
-const CHAMPS = { barre: 100, voxel: 0.5, emprise: 100, hauteur: 100, tolerance: 1, lissage: 10, modele: '' };
+const CHAMPS = { barre: 100, voxel: 0.5, emprise: 100, hauteur: 100, tolerance: 1, lissage: 10, ia: false, modele: '' };
 
 function reglages() {
   const r = {};
   for (const [k, def] of Object.entries(CHAMPS)) {
     const el = $('r-' + k);
-    if (typeof def === 'number') {
+    if (typeof def === 'boolean') {
+      r[k] = el.checked;
+    } else if (typeof def === 'number') {
       const v = parseFloat(String(el.value).replace(',', '.'));
       r[k] = Number.isFinite(v) ? v : def;
     } else {
@@ -108,7 +111,8 @@ function reglages() {
 function chargerReglages() {
   const s = lire(CLE_REGLAGES) || {};
   for (const [k, def] of Object.entries(CHAMPS)) {
-    $('r-' + k).value = s[k] !== undefined ? s[k] : def;
+    if (typeof def === 'boolean') $('r-' + k).checked = s[k] !== undefined ? !!s[k] : def;
+    else $('r-' + k).value = s[k] !== undefined ? s[k] : def;
     $('r-' + k).addEventListener('change', () => {
       ecrire(CLE_REGLAGES, reglages());
       if (k === 'modele') etat.segPret = false;
@@ -293,12 +297,53 @@ function dessinerMasque(vue) {
   tmp.width = vue.mw; tmp.height = vue.mh;
   const ctx = tmp.getContext('2d');
   const img = ctx.createImageData(vue.mw, vue.mh);
-  // Fond assombri, objet detoure laisse intact : un masque faux se voit immediatement
+  // Fond assombri, zones indeterminees legerement, objet laisse intact : un masque faux se voit immediatement
   for (let i = 0; i < vue.masque.length; i++) {
-    if (!vue.masque[i]) img.data[4 * i + 3] = 175;
+    if (vue.masque[i] === 0) img.data[4 * i + 3] = 185;
+    else if (vue.masque[i] === 2) img.data[4 * i + 3] = 70;
   }
   ctx.putImageData(img, 0, 0);
   vue.canvas.getContext('2d').drawImage(tmp, 0, 0, vue.canvas.width, vue.canvas.height);
+}
+
+/* Matrice de la camera ramenee a la resolution des masques. */
+function kMasque(K, W, H, mw, mh) {
+  const sx = mw / W, sy = mh / H;
+  const k = K.slice();
+  k[0] *= sx; k[1] *= sx; k[2] = (k[2] + 0.5) * sx - 0.5;
+  k[4] *= sy; k[5] = (k[5] + 0.5) * sy - 0.5;
+  return k;
+}
+
+/* Copie les pixels necessaires au detourage (la source peut etre reutilisee ensuite). */
+function extraire(source, mw, mh) {
+  return {
+    rgba: pixels(source, mw, mh),
+    rgbaIA: reglages().ia ? pixels(source, TAILLE_SEG, TAILLE_SEG) : null,
+  };
+}
+
+/* Detourage d'une vue deja posee : par comparaison avec le motif de la planche, ou par le modele IA en option. */
+async function detourerVue(vue, ext, cal) {
+  let masque;
+  if (ext.rgbaIA) {
+    await initSeg();
+    const s = await seg.appel('segmenter', { rgba: ext.rgbaIA, S: TAILLE_SEG, mw: vue.mw, mh: vue.mh }, [ext.rgbaIA.buffer]);
+    masque = s.masque;
+  } else {
+    const f = facteurPlanche(), r = reglages();
+    const s = await vision.appel('detourer', {
+      rgba: ext.rgba, mw: vue.mw, mh: vue.mh, R: vue.R, t: vue.t,
+      K: kMasque(cal.K, cal.W, cal.H, vue.mw, vue.mh), dist: cal.dist,
+      emprise: r.emprise / f, hauteur: r.hauteur / f,
+    }, [ext.rgba.buffer]);
+    masque = s.masque;
+  }
+  vue.masque = masque;
+  dessinerMasque(vue);
+  let surface = 0;
+  for (let k = 0; k < masque.length; k++) if (masque[k] === 1) surface++;
+  if (surface < masque.length * 0.001) throw new Error('Objet non détouré');
 }
 
 function majResume() {
@@ -336,11 +381,11 @@ async function ajouterPhotos(fichiers) {
   barre.hidden = false; barre.value = 0;
   try {
     await initVision();
-    await initSeg();
+    if (reglages().ia) await initSeg();
     const c = etat.calib;
     for (let i = 0; i < fichiers.length; i++) {
       const f = fichiers[i];
-      message(`Analyse de la photo ${i + 1} / ${fichiers.length} : planche et détourage`);
+      message(`Analyse de la photo ${i + 1} / ${fichiers.length}`);
       barre.value = i / fichiers.length;
       const vue = { nom: f.name, etat: 'attente', actif: true };
       etat.vues.push(vue);
@@ -358,22 +403,16 @@ async function ajouterPhotos(fichiers) {
           throw new Error(W === c.hauteur && H === c.largeur ? 'Orientation différente de la calibration' : 'Taille différente de la calibration');
         }
         const gris = versGris(pixels(bmp, W, H));
-        const rgba = pixels(bmp, TAILLE_SEG, TAILLE_SEG);
-        bmp.close(); bmp = null;
         const ms = TAILLE_MASQUE / Math.max(W, H);
         vue.mw = Math.round(W * ms); vue.mh = Math.round(H * ms);
-        const [p, s] = await Promise.all([
-          vision.appel('pose', { gris, w: W, h: H, K: c.K, dist: c.dist }, [gris.buffer]),
-          seg.appel('segmenter', { rgba, S: TAILLE_SEG, mw: vue.mw, mh: vue.mh }, [rgba.buffer]),
-        ]);
-        vue.masque = s.masque;
-        dessinerMasque(vue);
+        const ext = extraire(bmp, vue.mw, vue.mh);
+        bmp.close(); bmp = null;
+        const p = await vision.appel('pose', { gris, w: W, h: H, K: c.K, dist: c.dist }, [gris.buffer]);
         if (!p.R) throw new Error('Planche non détectée');
-        let surface = 0;
-        for (let k = 0; k < s.masque.length; k++) surface += s.masque[k];
-        if (surface < s.masque.length * 0.001) throw new Error('Objet non détouré');
-        if (p.err > ERREUR_POSE_MAX) throw new Error(`Pose imprecise (${fmt(p.err, 1)} px)`);
-        Object.assign(vue, { R: p.R, t: p.t, n: p.n, err: p.err, etat: 'ok' });
+        if (p.err > ERREUR_POSE_MAX) throw new Error(`Pose imprécise (${fmt(p.err, 1)} px)`);
+        Object.assign(vue, { R: p.R, t: p.t, n: p.n, err: p.err });
+        await detourerVue(vue, ext, { K: c.K, dist: c.dist, W, H });
+        vue.etat = 'ok';
       } catch (err) {
         vue.etat = 'erreur';
         vue.raison = err.message;
@@ -641,17 +680,13 @@ async function prendre(d, p, ev, W, H) {
   majVignette(vue);
   const ms = TAILLE_MASQUE / Math.max(W, H);
   vue.mw = Math.round(W * ms); vue.mh = Math.round(H * ms);
-  const rgba = pixels(d.toile, TAILLE_SEG, TAILLE_SEG);
+  const ext = extraire(d.toile, vue.mw, vue.mh);
+  const cal = { K: etat.calib.K, dist: etat.calib.dist, W, H };
   d.enCours++;
   // Detourage en file d'attente : la prise de vue continue pendant le calcul
   d.file = d.file.then(async () => {
     try {
-      const s = await seg.appel('segmenter', { rgba, S: TAILLE_SEG, mw: vue.mw, mh: vue.mh }, [rgba.buffer]);
-      vue.masque = s.masque;
-      dessinerMasque(vue);
-      let surface = 0;
-      for (let k = 0; k < s.masque.length; k++) surface += s.masque[k];
-      if (surface < s.masque.length * 0.001) throw new Error('Objet non détouré');
+      await detourerVue(vue, ext, cal);
       vue.etat = 'ok';
     } catch (err) {
       vue.etat = 'erreur';
@@ -690,7 +725,7 @@ async function ouvrirDirect(mode) {
   let flux = null;
   try {
     await initVision();
-    if (mode === 'scan') await initSeg();
+    if (mode === 'scan' && reglages().ia) await initSeg();
     if (mode === 'calib') await vision.appel('calib-reset');
     flux = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -837,10 +872,7 @@ async function reconstruire() {
     const f = facteurPlanche();
     const c = etat.calib;
     const { mw, mh } = actives[0];
-    const sx = mw / c.largeur, sy = mh / c.hauteur;
-    const K = c.K.slice();
-    K[0] *= sx; K[1] *= sx; K[2] = (K[2] + 0.5) * sx - 0.5;
-    K[4] *= sy; K[5] = (K[5] + 0.5) * sy - 0.5;
+    const K = kMasque(c.K, c.largeur, c.hauteur, mw, mh);
     const centre = [(PLANCHE.nx * PLANCHE.carre * f) / 2, (PLANCHE.ny * PLANCHE.carre * f) / 2];
     const t0 = performance.now();
     const res = await recon.appel('reconstruire', {

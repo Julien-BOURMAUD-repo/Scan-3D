@@ -237,7 +237,7 @@
       <li>Une partie de la planche visible sur chaque photo, objet net.</li>
       <li>Objet brillant ou transparent : le matifier (spray, talc).</li>
     </ul>
-    <p class="doux">Au premier usage, le modèle de détourage (44 Mo) est téléchargé puis gardé en cache.</p>
+    <p class="doux">Le détourage compare chaque image au motif connu de la planche. Objet clair, fond assombri sur les vignettes : si la feuille reste claire autour de l'objet, exclure la vue.</p>
     <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; le dôme à l'écran montre les angles pris. Quand la couverture est suffisante, l'aperçu 3D s'affiche tout seul.</p>
     <div class="boutons">
       <button id="photos-direct" class="bouton" type="button" data-bloquable>Prise en direct</button>
@@ -279,6 +279,7 @@
         </label>
       </div>
       <p class="doux" style="margin-top:12px">Voxel plus petit : plus de détails, calcul plus long (0,5 mm prend environ 4 fois plus de temps que 0,8 mm). Tolérance : nombre de photos où un point peut sortir de la silhouette sans être enlevé.</p>
+      <label class="case"><input id="r-ia" type="checkbox"> Détourage par modèle d'IA (plus lent, 44 Mo à télécharger, à essayer seulement si le détourage par la planche échoue)</label>
       <label class="champ" style="margin-top:8px">Modèle de détourage (URL ONNX, laisser vide pour RMBG-1.4)
         <input id="r-modele" type="url" placeholder="https://...">
       </label>
@@ -337,6 +338,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=4"></script>
 </body>
 </html>

@@ -70,6 +70,18 @@ function sculpter(m) {
   return { garde, nx, ny, nz, x0, y0, signe };
 }
 
+/* Pres de la feuille, ombres et carres noirs laissent des debords : un voxel des 1,5 premiers mm
+   n'est garde que si l'objet continue au-dessus, a 2 mm. */
+function nettoyerSol(s, vx) {
+  const { garde, nx, ny, nz } = s;
+  const kRef = Math.min(nz - 1, Math.round(2 / vx - 0.5));
+  const plan = nx * ny;
+  for (let k = 0; k < kRef; k++) {
+    if ((k + 0.5) * vx >= 1.5) break;
+    for (let i = 0; i < plan; i++) if (!garde[kRef * plan + i]) garde[k * plan + i] = 0;
+  }
+}
+
 /* Recadre, bouche les cavites fermees et garde la plus grande composante connexe. */
 function nettoyer(s) {
   const { garde, nx, ny, nz } = s;
@@ -287,6 +299,7 @@ self.onmessage = (e) => {
     if (m.type === 'reconstruire') {
       const s = sculpter(m);
       progres('nettoyage', 0);
+      nettoyerSol(s, m.params.voxel);
       const nt = nettoyer(s);
       volume = { ...nt, vx: m.params.voxel, x0: s.x0, y0: s.y0, centre: m.centre, signe: s.signe };
       const r = mailler(m.couperZ || 0, m.params.lissage);

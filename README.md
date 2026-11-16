@@ -23,14 +23,28 @@ ouvrir `http://localhost:8000` (ouvrir `index.html` directement depuis l'explora
 |---|---|
 | `index.html` | Interface |
 | `app.js` | Enchaînement des étapes, dimensions, aperçu 3D, export STL |
-| `vision-worker.js` | Détection de la planche, pose de chaque photo, calibration (OpenCV.js) |
-| `seg-worker.js` | Détourage de l'objet (modèle RMBG-1.4, ONNX Runtime Web) |
+| `vision-worker.js` | Détection de la planche, pose de chaque photo, calibration, détourage (OpenCV.js) |
+| `seg-worker.js` | Détourage optionnel par modèle d'IA (RMBG-1.4, ONNX Runtime Web) |
 | `recon-worker.js` | Sculpture du volume, maillage, lissage |
 | `planche.pdf` | Planche ChArUco A4 à imprimer (9 x 13 carrés de 20 mm) |
 
-Les bibliothèques sont chargées depuis cdn.jsdelivr.net (OpenCV.js 5.0, ONNX Runtime Web 1.22,
-three.js 0.160) et le modèle de détourage depuis huggingface.co, puis gardés en cache par le
-navigateur.
+Les bibliothèques sont chargées depuis cdn.jsdelivr.net (OpenCV.js 5.0, three.js 0.160, et
+ONNX Runtime Web 1.22 si l'option IA est activée), puis gardées en cache par le navigateur.
+
+Après chaque mise à jour des fichiers, augmenter `VERSION` en haut de `app.js` et le `?v=` de
+`app.js` dans `index.html` (même valeur) : sinon le navigateur peut mélanger anciens et nouveaux
+fichiers pendant quelques minutes.
+
+## Détourage
+
+L'objet est séparé du fond en comparant chaque image au motif connu de la planche : grâce à la
+pose, l'appli sait quel carré noir ou blanc devrait apparaître à chaque pixel. Ce qui ne
+correspond pas est l'objet. Les pixels ambigus (bord d'un carré, objet très sombre posé sur du
+noir) restent indéterminés et ne retirent rien du volume. Sur les vignettes : objet clair, fond
+assombri, zones indéterminées à peine assombries.
+
+Un modèle d'IA (RMBG-1.4, 44 Mo, licence non commerciale) reste disponible dans les réglages
+avancés, mais il a tendance à prendre toute la feuille pour l'objet.
 
 ## Utilisation
 
@@ -74,8 +88,10 @@ reste un peu plus précis.
 ## Limites
 
 - Les creux (intérieur d'un bol, rainure, trou borgne) ne sont pas reconstruits.
-- Les dimensions brutes sont en général 1 à 2 % trop grandes : corriger avec une cote mesurée.
-- Objets brillants, transparents ou de la couleur de la planche : détourage peu fiable.
-- Le modèle RMBG-1.4 (BRIA AI) est sous licence non commerciale : usage personnel uniquement.
-  Un autre modèle ONNX de détourage (entrée 1 x 3 x 1024 x 1024, sortie 1 x 1 x 1024 x 1024)
+- Les dimensions brutes sont en général 2 à 5 % trop grandes : corriger avec une cote mesurée.
+- Objets brillants, transparents, blancs ou noir profond : détourage peu fiable (un objet blanc
+  se confond avec le papier, un objet noir avec l'encre). Un gris, même foncé, ou une couleur
+  passent bien.
+- Le modèle RMBG-1.4 (option IA, BRIA AI) est sous licence non commerciale : usage personnel
+  uniquement. Un autre modèle ONNX (entrée 1 x 3 x 1024 x 1024, sortie 1 x 1 x 1024 x 1024)
   peut être indiqué dans les réglages avancés.
