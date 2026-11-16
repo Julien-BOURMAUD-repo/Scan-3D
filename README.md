@@ -73,8 +73,11 @@ Les étapes 2 et 3 peuvent se faire caméra ouverte, sans passer par l'appareil 
 - **Calibrer en direct** : filmer la planche seule en tournant autour, en variant hauteur et
   distance. 20 images sont prises automatiquement, puis la calibration est calculée.
 - **Prise en direct** : tourner lentement autour de l'objet. Une vue est prise dès que le
-  téléphone est stable sur un angle pas encore couvert. Le dôme en haut à droite montre les
-  angles pris (centre : vues du dessus, bord : vues basses), le point blanc la position actuelle.
+  téléphone est stable sur un angle pas encore couvert. Un anneau dessiné sur la feuille autour
+  de l'objet montre la couverture sur 360 degrés : un secteur se colore en vert quand la vue
+  prise de ce côté est faite. Anneau extérieur : vues basses ; anneaux suivants : vues de plus
+  en plus hautes ; anneau intérieur : vues du dessus. Le secteur où se trouve le téléphone est
+  entouré de blanc.
   Le cadre en pointillés est la zone de travail : l'objet doit tenir dedans. Quand chaque étage
   du dôme est couvert, la capture s'arrête, les vues sont détourées et l'aperçu 3D s'affiche.
   "Arrêter" garde les vues prises pour reprendre plus tard, "Terminer et reconstruire" lance

@@ -159,6 +159,7 @@
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px; font-size: 0.95rem;
     background: linear-gradient(rgb(0 0 0 / 0.65), transparent);
   }
+  #direct-dome[hidden] { display: none; }
   #direct-dome { position: absolute; right: 12px; top: calc(52px + env(safe-area-inset-top)); width: 150px; height: 150px; }
   .direct-bas {
     position: absolute; left: 0; right: 0; bottom: 0;
@@ -238,7 +239,7 @@
       <li>Objet brillant ou transparent : le matifier (spray, talc).</li>
     </ul>
     <p class="doux">Le détourage compare chaque image au motif connu de la planche. Objet clair, fond assombri sur les vignettes : si la feuille reste claire autour de l'objet, exclure la vue.</p>
-    <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; le dôme à l'écran montre les angles pris. Quand la couverture est suffisante, l'aperçu 3D s'affiche tout seul.</p>
+    <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; l'anneau dessiné sur la feuille autour de l'objet se colore au fur et à mesure (extérieur : vues basses, intérieur : vues du dessus). Quand la couverture est suffisante, l'aperçu 3D s'affiche tout seul.</p>
     <div class="boutons">
       <button id="photos-direct" class="bouton" type="button" data-bloquable>Prise en direct</button>
       <label id="photos-ajouter" class="bouton secondaire" data-bloquable>
@@ -338,6 +339,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=4"></script>
+<script type="module" src="app.js?v=5"></script>
 </body>
 </html>

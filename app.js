@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '4'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '5'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -550,7 +550,40 @@ function evaluer(d, p, t, cam) {
   return { ok: true, direction };
 }
 
-function dessinerCalque(d, p, cam, W, H, ok) {
+/* Anneau de couverture pose sur la feuille autour de l'objet : un anneau par etage du dome
+   (exterieur = vues basses, interieur = vues du dessus), un secteur par case d'azimut.
+   Le secteur d'une vue est du cote ou se trouvait le telephone. */
+function dessinerAnneau(ctx, d, p, cam, versEcran, courant) {
+  const L = PLANCHE.nx * PLANCHE.carre, Hp = PLANCHE.ny * PLANCHE.carre;
+  const f = facteurPlanche();
+  const base = (reglages().emprise / 2 / f) * 1.06;
+  const largeur = 9 / f, ecart = 1.5 / f;
+  const caseCourante = courant ? caseDe(courant) : null;
+  const point = (r, a) => versEcran(projeterPoint(cam.K, cam.dist, p.R, p.t, L / 2 + r * Math.cos(a), Hp / 2 + r * Math.sin(a), 0));
+  ANNEAUX.forEach((anneau, i) => {
+    const rIn = base + (ANNEAUX.length - 1 - i) * largeur;
+    const rOut = rIn + largeur - ecart;
+    const pas = (2 * Math.PI) / anneau.n;
+    for (let b = 0; b < anneau.n; b++) {
+      const a0 = b * pas + 0.03, a1 = (b + 1) * pas - 0.03;
+      const pts = [];
+      for (let k = 0; k <= 6; k++) pts.push(point(rOut, a0 + ((a1 - a0) * k) / 6));
+      for (let k = 6; k >= 0; k--) pts.push(point(rIn, a0 + ((a1 - a0) * k) / 6));
+      ctx.beginPath();
+      pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      const cle = `${i}-${b}`;
+      const prise = d.cases.has(cle);
+      ctx.fillStyle = prise ? 'rgba(79, 209, 165, 0.8)' : 'rgba(30, 30, 30, 0.5)';
+      ctx.fill();
+      ctx.lineWidth = cle === caseCourante ? 3 : 1;
+      ctx.strokeStyle = cle === caseCourante ? '#ffffff' : 'rgba(255, 255, 255, 0.55)';
+      ctx.stroke();
+    }
+  });
+}
+
+function dessinerCalque(d, p, cam, W, H, ok, courant) {
   const cnv = $('direct-calque');
   const r = cnv.getBoundingClientRect();
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -585,6 +618,7 @@ function dessinerCalque(d, p, cam, W, H, ok) {
   ctx.strokeStyle = ok ? '#4fd1a5' : 'rgba(255, 255, 255, 0.85)';
   tracer(contour(0, 0, L, Hp));
   if (d.mode === 'scan') {
+    dessinerAnneau(ctx, d, p, cam, ([u, v]) => [ox + u * s, oy + v * s], courant);
     // Zone de travail : l'objet doit tenir dans ce carre
     const e = reglages().emprise / facteurPlanche() / 2;
     ctx.setLineDash([8, 6]);
@@ -754,6 +788,7 @@ async function ouvrirDirect(mode) {
   try { if (navigator.wakeLock) d.verrou = await navigator.wakeLock.request('screen'); } catch (e) { d.verrou = null; }
   $('direct-titre').textContent = mode === 'calib' ? 'Calibration en direct' : 'Scan en direct';
   $('direct-terminer').textContent = mode === 'calib' ? 'Calculer la calibration' : 'Terminer et reconstruire';
+  $('direct-dome').hidden = mode === 'scan'; // en scan, la couverture s'affiche autour de l'objet
   $('direct').hidden = false;
   document.body.classList.add('direct-ouvert');
   majDirect(d, mode === 'calib'
@@ -788,7 +823,7 @@ async function boucleDirect(d) {
       }
       if (!d.actif) break;
       const ev = evaluer(d, p, t, cam);
-      dessinerCalque(d, p, cam, W, H, ev.ok);
+      dessinerCalque(d, p, cam, W, H, ev.ok, ev.direction);
       dessinerDome(d, ev.direction);
       if (ev.ok) {
         await prendre(d, p, ev, W, H);
