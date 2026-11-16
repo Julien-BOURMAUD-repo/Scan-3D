@@ -1,6 +1,7 @@
 'use strict';
 /* Sculpture de silhouettes (visual hull), maillage par surface nets et lissage de Taubin. */
 
+let brut = null;   // volume sculpte avec ses scores, garde pour rejouer le seuil de detection
 let volume = null; // dernier volume reconstruit, garde pour remailler (coupe en hauteur)
 
 function progres(etape, valeur) {
@@ -38,13 +39,14 @@ function sculpter(m) {
   const umax = mw - 0.5, vmax = mh - 0.5;
 
   const garde = new Uint8Array(nx * ny * nz);
+  const score = new Uint8Array(nx * ny * nz); // part des vues qui voient le voxel comme objet (1 a 255)
   for (let k = 0; k < nz; k++) {
     const Z = signe * (k + 0.5) * vx;
     for (let j = 0; j < ny; j++) {
       const Y = y0 + j * vx;
       for (let i = 0; i < nx; i++) {
         const X = x0 + i * vx;
-        let dehors = 0, vu = 0;
+        let dehors = 0, vu = 0, objet = 0;
         for (let v = 0; v < nv; v++) {
           const o = v * 12;
           const zc = P[o + 6] * X + P[o + 7] * Y + P[o + 8] * Z + P[o + 11];
@@ -60,18 +62,53 @@ function sculpter(m) {
           const w = fy * yd + cy;
           if (u < -0.5 || w < -0.5 || u >= umax || w >= vmax) continue;
           vu++;
-          if (masques[v][((w + 0.5) | 0) * mw + ((u + 0.5) | 0)] === 0 && ++dehors > tol) break;
+          const c = masques[v][((w + 0.5) | 0) * mw + ((u + 0.5) | 0)];
+          if (c === 1) objet++;
+          else if (c === 0 && ++dehors > tol) break;
         }
-        if (vu >= 3 && dehors <= tol) garde[(k * ny + j) * nx + i] = 1;
+        if (vu >= 3 && dehors <= tol) {
+          garde[(k * ny + j) * nx + i] = 1;
+          score[(k * ny + j) * nx + i] = Math.max(1, Math.round((255 * objet) / vu));
+        }
       }
     }
     if ((k & 3) === 0) progres('sculpture', k / nz);
   }
-  return { garde, nx, ny, nz, x0, y0, signe };
+  return { garde, score, nx, ny, nz, x0, y0, signe };
 }
 
 /* Pres de la feuille, ombres et carres noirs laissent des debords : un voxel des 1,5 premiers mm
    n'est garde que si l'objet continue au-dessus, a 2 mm. */
+/* Seuil de detection : ne garde que les voxels dont le score atteint une part du score typique
+   de l'objet (score median des voxels sculptes). Relatif, car un objet colore est vu comme objet
+   dans presque toutes les vues, un objet sombre dans une partie seulement. */
+function appliquerSeuil(brut, seuil, auto) {
+  const { garde, score } = brut;
+  const histo = new Uint32Array(256);
+  let total = 0;
+  for (let i = 0; i < garde.length; i++) if (garde[i]) { histo[score[i]]++; total++; }
+  let cumul = 0, mediane = 255;
+  for (let v = 0; v < 256; v++) { cumul += histo[v]; if (cumul >= total / 2) { mediane = v; break; } }
+  // Scores peu discriminants (objet sombre ou de la teinte de la planche) : en automatique, pas de filtrage
+  const fiable = mediane >= 0.75 * 255;
+  const applique = auto && !fiable ? 0 : seuil;
+  const limite = applique * mediane;
+  const sortie = new Uint8Array(garde.length);
+  for (let i = 0; i < garde.length; i++) if (garde[i] && score[i] >= limite) sortie[i] = 1;
+  return { ...brut, garde: sortie, seuilApplique: applique, fiable };
+}
+
+/* Du volume sculpte au maillage : seuil, nettoyage, maillage. Rejouable sans refaire la sculpture. */
+function construire(seuil, couperZ, lissage, auto) {
+  if (!brut) throw new Error('Aucun volume reconstruit.');
+  const s = appliquerSeuil(brut, seuil, auto);
+  nettoyerSol(s, brut.vx);
+  const nt = nettoyer(s);
+  volume = { ...nt, vx: brut.vx, x0: brut.x0, y0: brut.y0, centre: brut.centre, signe: brut.signe };
+  const r = mailler(couperZ, lissage);
+  return { ...r, bord: nt.bord, voxels: nt.voxels, seuilApplique: s.seuilApplique, fiable: s.fiable };
+}
+
 function nettoyerSol(s, vx) {
   const { garde, nx, ny, nz } = s;
   const kRef = Math.min(nz - 1, Math.round(2 / vx - 0.5));
@@ -299,11 +336,12 @@ self.onmessage = (e) => {
     if (m.type === 'reconstruire') {
       const s = sculpter(m);
       progres('nettoyage', 0);
-      nettoyerSol(s, m.params.voxel);
-      const nt = nettoyer(s);
-      volume = { ...nt, vx: m.params.voxel, x0: s.x0, y0: s.y0, centre: m.centre, signe: s.signe };
-      const r = mailler(m.couperZ || 0, m.params.lissage);
-      self.postMessage({ id: m.id, ...r, bord: nt.bord, voxels: nt.voxels }, [r.positions.buffer, r.indices.buffer]);
+      brut = { ...s, vx: m.params.voxel, centre: m.centre };
+      const r = construire(m.seuil || 0, m.couperZ || 0, m.params.lissage, true);
+      self.postMessage({ id: m.id, ...r }, [r.positions.buffer, r.indices.buffer]);
+    } else if (m.type === 'seuil') {
+      const r = construire(m.seuil || 0, m.couperZ || 0, m.lissage);
+      self.postMessage({ id: m.id, ...r }, [r.positions.buffer, r.indices.buffer]);
     } else if (m.type === 'remailler') {
       const r = mailler(m.couperZ || 0, m.lissage);
       self.postMessage({ id: m.id, ...r }, [r.positions.buffer, r.indices.buffer]);

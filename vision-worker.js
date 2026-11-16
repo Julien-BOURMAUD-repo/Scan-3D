@@ -239,16 +239,19 @@ function detourer(m) {
   const B0 = noir ? null : 30;
 
   const masque = new Uint8Array(n);
+  const blancPix = new Float32Array(n);
   const sombres = [];
+  const teintes = []; // saturation relative des pixels d'objet vus sur du blanc
   for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
     const i = v * mw + u;
     if (!dedans[i]) continue;
     const W = blanc(u, v), Bk = noir ? noir(u, v) : B0;
+    blancPix[i] = W;
     const ecart = Math.max(20, W - Bk);
     const colore = chroma[i] > 0.25 * W;
     const c = net[i];
     if (c === 1) {
-      if (colore || lum[i] < W - 0.35 * ecart) { masque[i] = 1; sombres.push((lum[i] - Bk) / ecart); }
+      if (colore || lum[i] < W - 0.35 * ecart) { masque[i] = 1; sombres.push((lum[i] - Bk) / ecart); teintes.push(chroma[i] / W); }
     } else if (c === 0) {
       // Sur le noir imprime : seuil fin, zone ambigue decidee selon la teinte de l'objet
       if (colore || lum[i] > Bk + 0.15 * ecart) masque[i] = 1;
@@ -261,16 +264,39 @@ function detourer(m) {
   // Objet tres sombre : il se confond avec le noir imprime, la zone ambigue reste alors indeterminee
   sombres.sort((a, b) => a - b);
   const objetSombre = sombres.length > 20 && sombres[sombres.length >> 1] < 0.2;
-  for (let i = 0; i < n; i++) if (masque[i] === 3) masque[i] = objetSombre ? 2 : 0;
+  // Objet nettement colore : un ecart sans couleur (ombre, bord de carre decale) est du fond.
+  // Le seuil suit la saturation de l'objet, pour ignorer aussi le reflet colore de l'objet sur le papier.
+  // (les faux positifs, eux, sont incolores : on juge sur la part de pixels colores)
+  const colores = teintes.filter((x) => x > 0.25).sort((a, b) => a - b);
+  const objetColore = colores.length > Math.max(300, n * 0.002) && colores.length > 0.4 * teintes.length;
+  if (objetColore) {
+    const seuil = Math.max(0.25, 0.4 * colores[colores.length >> 1]);
+    for (let i = 0; i < n; i++) {
+      if (!dedans[i] || masque[i] === 0) continue;
+      if (chroma[i] > seuil * blancPix[i]) masque[i] = 1;
+      else masque[i] = net[i] === -1 ? 2 : 0;
+    }
+  } else {
+    for (let i = 0; i < n; i++) if (masque[i] === 3) masque[i] = objetSombre ? 2 : 0;
+  }
 
-  // Points isoles : indetermines plutot qu'objet
-  const tmp = masque.slice();
+  // Detections de moins de 3 px d'epaisseur (bords de carres decales quand la feuille n'est pas
+  // tout a fait plane) : indeterminees. Ouverture morphologique 3 x 3 : les vrais objets restent entiers.
+  const huit = [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1];
+  const erode = new Uint8Array(n);
   for (let v = 1; v < mh - 1; v++) for (let u = 1; u < mw - 1; u++) {
     const i = v * mw + u;
-    if (tmp[i] !== 1) continue;
-    let k = 0;
-    for (const d of [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1]) if (tmp[i + d] === 1) k++;
-    if (k < 2) masque[i] = 2;
+    if (masque[i] !== 1) continue;
+    let plein = true;
+    for (const d of huit) if (masque[i + d] !== 1) { plein = false; break; }
+    if (plein) erode[i] = 1;
+  }
+  for (let v = 1; v < mh - 1; v++) for (let u = 1; u < mw - 1; u++) {
+    const i = v * mw + u;
+    if (masque[i] !== 1 || erode[i]) continue;
+    let garde = false;
+    for (const d of huit) if (erode[i + d]) { garde = true; break; }
+    if (!garde) masque[i] = 2;
   }
   // Zones de fond enfermees dans l'objet (reflet, logo clair) : indeterminees, pour ne pas creuser l'objet.
   // Le fond reel est relie au bord de l'image sans traverser l'objet.
@@ -292,7 +318,7 @@ function detourer(m) {
     if (masque[i] === 0 && !relie[i]) masque[i] = 2;
     if (masque[i] === 1) objet++;
   }
-  return { masque, objet, sombre: objetSombre };
+  return { masque, objet, sombre: objetSombre, colore: objetColore };
 }
 
 function calibrer(w, h) {

@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '5'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '7'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -914,18 +914,49 @@ async function reconstruire() {
       vues: actives.map((v) => ({ R: v.R, t: v.t.map((x) => x * f), masque: v.masque })),
       mw, mh, K, dist: c.dist, centre,
       params: { voxel: r.voxel, emprise: r.emprise, hauteur: r.hauteur, tolerance: r.tolerance, lissage: r.lissage },
+      seuil: 0.6,
     });
     const duree = (performance.now() - t0) / 1000;
     etat.modele = { base: res.positions, indices: res.indices, angle: 0, facteurs: [1, 1, 1] };
     $('d-couper').value = '';
+    $('d-seuil').value = Math.round(res.seuilApplique * 100);
+    $('d-seuil-valeur').textContent = `${$('d-seuil').value} %`;
     $('resultat').hidden = false;
     await majModele(true);
     let txt = `Reconstruction terminée en ${fmt(duree, 1)} s avec ${actives.length} vues (${res.indices.length / 3} triangles).`;
+    if (!res.fiable) txt += ' Objet sombre ou peu contrasté : seuil de détection laissé à 0 %, à régler à la main si besoin.';
     if (res.bord) txt += ' Attention : l\'objet touche le bord du volume de travail, augmenter l\'emprise ou la hauteur, ou vérifier les masques.';
     message(txt, res.bord ? 'alerte' : 'ok');
     $('resultat').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
     message('Reconstruction : ' + err.message, 'erreur');
+  } finally {
+    barre.hidden = true;
+    occuper(false);
+  }
+}
+
+function seuilDetection() {
+  return Math.min(0.95, Math.max(0, Number($('d-seuil').value) / 100));
+}
+
+/* Rejoue le seuil de detection sur le volume deja sculpte (rapide, sans refaire la sculpture). */
+async function changerSeuil() {
+  if (!etat.modele) return;
+  const v = parseFloat(String($('d-couper').value).replace(',', '.'));
+  occuper(true);
+  const barre = $('recon-progres');
+  barre.hidden = false; barre.value = 0.8;
+  suivreRecon(barre);
+  try {
+    const res = await recon.appel('seuil', { seuil: seuilDetection(), couperZ: Number.isFinite(v) && v > 0 ? v : 0, lissage: reglages().lissage });
+    etat.modele.base = res.positions;
+    etat.modele.indices = res.indices;
+    etat.modele.facteurs = [1, 1, 1];
+    await majModele(false);
+    message(`Seuil de détection à ${$('d-seuil').value} % : ${res.indices.length / 3} triangles.`, 'ok');
+  } catch (err) {
+    message('Seuil de détection : ' + err.message, 'erreur');
   } finally {
     barre.hidden = true;
     occuper(false);
@@ -1214,6 +1245,8 @@ function demarrer() {
   $('d-reinit').addEventListener('click', reinitialiser);
   $('d-aligner').addEventListener('click', aligner);
   $('d-couper-btn').addEventListener('click', couper);
+  $('d-seuil').addEventListener('input', () => { $('d-seuil-valeur').textContent = `${$('d-seuil').value} %`; });
+  $('d-seuil').addEventListener('change', changerSeuil);
   $('stl-telecharger').addEventListener('click', exporterSTL);
   message(etat.calib ? 'Prêt. Lancer la prise en direct ou charger des photos de l\'objet.' : 'Commencer par imprimer la planche et calibrer le téléphone.');
 }

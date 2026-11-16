@@ -131,6 +131,7 @@
   table.dims td:first-child { font-weight: 700; width: 2.5em; }
   table.dims input { max-width: 140px; }
   .case { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; min-height: 44px; }
+  input[type="range"] { width: 100%; min-height: 44px; accent-color: var(--accent); }
   .case input { width: 22px; height: 22px; accent-color: var(--accent); }
   .ligne-coupe { display: flex; gap: 8px; align-items: end; margin-top: 12px; }
   .ligne-coupe label { flex: 1; }
@@ -306,6 +307,10 @@
       <button id="d-aligner" class="bouton secondaire" type="button" data-bloquable>Aligner sur les axes</button>
       <button id="d-reinit" class="bouton secondaire" type="button" data-bloquable>Revenir au scan</button>
     </div>
+    <label class="champ" style="margin-top:14px">Seuil de détection : <strong id="d-seuil-valeur">60 %</strong>
+      <input id="d-seuil" type="range" min="0" max="95" step="5" value="60" data-bloquable>
+    </label>
+    <p class="doux" style="margin-top:4px">Chaque point du volume a un score : la part des vues qui le voient comme objet. Monter le seuil enlève les débris et artefacts ; le baisser si des morceaux de l'objet disparaissent (objet sombre). 0 % : aucun filtrage.</p>
     <div class="ligne-coupe">
       <label class="champ">Couper à la hauteur (mm), pour un dessus plat
         <input id="d-couper" type="number" inputmode="decimal" step="0.1" min="0" placeholder="aucune coupe" data-bloquable>
@@ -339,6 +344,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=5"></script>
+<script type="module" src="app.js?v=7"></script>
 </body>
 </html>
