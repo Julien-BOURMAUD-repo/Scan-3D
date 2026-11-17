@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '13'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '14'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -528,10 +528,30 @@ function consigneCouverture(d, dir) {
   return 'Couverture complète';
 }
 
-function evaluer(d, p, t, cam) {
+/* Luminosite, part de pixels satures et nettete de l'image (sur un pixel sur 16). La nettete est
+   comparee a celle des autres images de la meme pause du telephone (la liste est videe a chaque
+   mouvement) : cela ecarte le flou de bouge sans comparer des angles de vue differents. */
+function mesurerQualite(d, gris, W, H) {
+  let somme = 0, sature = 0, lap = 0, n = 0;
+  for (let v = 4; v < H - 4; v += 4) for (let u = 4; u < W - 4; u += 4) {
+    const i = v * W + u, g = gris[i];
+    somme += g;
+    if (g >= 250) sature++;
+    lap += Math.abs(4 * g - gris[i - 2] - gris[i + 2] - gris[i - 2 * W] - gris[i + 2 * W]);
+    n++;
+  }
+  const nettete = lap / n;
+  d.nettetes.push(nettete);
+  if (d.nettetes.length > 12) d.nettetes.shift();
+  return { lum: somme / n, sature: sature / n, nettete };
+}
+
+function evaluer(d, p, t, cam, qualite, W, H) {
+  if (qualite.lum < 45) { d.precedent = null; return { consigne: 'Trop sombre : ajouter de la lumière', niveau: 'alerte' }; }
   const calib = d.mode === 'calib';
   if (!p.R || p.n < (calib ? DIRECT.calibCoinsMin : DIRECT.coinsMin)) {
     d.precedent = null;
+    d.nettetes = [];
     return {
       consigne: calib && p.R ? 'Cadrer une plus grande partie de la planche'
         : 'Planche non détectée : la garder dans le cadre, au moins en partie',
@@ -547,7 +567,10 @@ function evaluer(d, p, t, cam) {
   }
   d.precedent = { t, coins };
   const direction = directionCamera(p);
-  if (vitesse > DIRECT.vitesseMax) return { direction, consigne: 'Stabiliser le téléphone', niveau: '' };
+  if (vitesse > DIRECT.vitesseMax) {
+    d.nettetes = [qualite.nettete];
+    return { direction, consigne: 'Stabiliser le téléphone', niveau: '' };
+  }
   // En calibration, la distorsion n'est pas encore connue : l'erreur de pose n'est pas un critere
   if (!calib && p.err > ERREUR_POSE_MAX) {
     return { direction, consigne: 'Image peu nette : stabiliser le téléphone', niveau: 'alerte' };
@@ -555,6 +578,12 @@ function evaluer(d, p, t, cam) {
   const c = caseDe(direction);
   if (!c) return { direction, consigne: 'Vue trop rasante : monter le téléphone', niveau: 'alerte' };
   if (d.cases.has(c)) return { direction, consigne: consigneCouverture(d, direction), niveau: '' };
+  // Case libre : on n'y prend qu'une bonne image
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const q of coins) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+  if (Math.max(x1 - x0, y1 - y0) < 0.4 * Math.max(W, H)) return { direction, consigne: 'Trop loin : rapprocher le téléphone', niveau: 'alerte' };
+  if (qualite.sature > 0.35) return { direction, consigne: 'Reflets ou lumière trop forte : changer d\'angle ou adoucir l\'éclairage', niveau: 'alerte' };
+  if (qualite.nettete < 0.75 * Math.max(...d.nettetes)) return { direction, consigne: 'Image floue : garder le téléphone immobile un instant', niveau: '' };
   return { ok: true, direction, cle: c };
 }
 
@@ -656,43 +685,41 @@ function signalerPrise() {
   try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* non supporte */ }
 }
 
+/* Prend la vue courante. Retourne null si elle est acceptee, sinon la raison du refus. */
 async function prendre(d, p, ev, W, H) {
-  signalerPrise();
   if (d.mode === 'calib') {
     const r = await vision.appel('calib-garder');
-    if (!r.garde) return;
+    if (!r.garde) return 'Planche trop peu visible';
+    signalerPrise();
     d.cases.add(ev.cle);
     d.prises++;
     d.taille = [W, H];
-    return;
+    return null;
   }
-  d.cases.add(ev.cle);
+  // La vue n'est acceptee que si l'objet y est correctement detoure : la case de l'anneau ne se
+  // valide pas sinon, et la raison s'affiche tout de suite au lieu d'un rejet decouvert a la fin.
   const vue = { nom: `direct-${etat.vues.length + 1}`, etat: 'attente', actif: true, R: p.R, t: p.t, n: p.n, err: p.err };
-  etat.vues.push(vue);
   creerVignette(vue);
   vue.canvas.width = 160;
   vue.canvas.height = Math.round((160 * H) / W);
   vue.canvas.getContext('2d').drawImage(d.toile, 0, 0, vue.canvas.width, vue.canvas.height);
-  majVignette(vue);
   const ms = TAILLE_MASQUE / Math.max(W, H);
   vue.mw = Math.round(W * ms); vue.mh = Math.round(H * ms);
-  const ext = extraire(d.toile, vue.mw, vue.mh);
-  const cal = { K: etat.calib.K, dist: etat.calib.dist, W, H };
-  d.enCours++;
-  // Detourage en file d'attente : la prise de vue continue pendant le calcul
-  d.file = d.file.then(async () => {
-    try {
-      await detourerVue(vue, ext, cal);
-      vue.etat = 'ok';
-    } catch (err) {
-      vue.etat = 'erreur';
-      vue.raison = err.message;
-    }
-    d.enCours--;
-    majVignette(vue);
-    majResume();
-    if (d.actif) majDirect(d);
-  });
+  try {
+    await detourerVue(vue, extraire(d.toile, vue.mw, vue.mh), { K: etat.calib.K, dist: etat.calib.dist, W, H });
+  } catch (err) {
+    vue.el.remove();
+    if (/non détouré/.test(err.message)) return 'Objet non reconnu : le placer dans le cadre en pointillés, bien éclairé';
+    if (/aberrant/.test(err.message)) return 'Planche mal reconnue sur cette vue : éviter les reflets';
+    return err.message;
+  }
+  vue.etat = 'ok';
+  etat.vues.push(vue);
+  d.cases.add(ev.cle);
+  signalerPrise();
+  majVignette(vue);
+  majResume();
+  return null;
 }
 
 /* Termine : couverture globale atteinte et chaque etage de l'anneau (dessus compris) rempli. */
@@ -736,7 +763,7 @@ async function ouvrirDirect(mode) {
   video.srcObject = flux;
   const d = {
     mode, flux, video, actif: true, action: 'arreter',
-    cases: new Set(), prises: 0, taille: null,
+    cases: new Set(), prises: 0, taille: null, nettetes: [],
     precedent: null, file: Promise.resolve(), enCours: 0,
     toile: document.createElement('canvas'), verrou: null,
   };
@@ -772,6 +799,7 @@ async function boucleDirect(d) {
       ctx.drawImage(v, 0, 0, W, H);
       const t = performance.now();
       const gris = versGris(ctx.getImageData(0, 0, W, H).data);
+      const qualite = mesurerQualite(d, gris, W, H);
       let p;
       try {
         p = await vision.appel('pose', { gris, w: W, h: H, K: cam.K, dist: cam.dist }, [gris.buffer]);
@@ -781,12 +809,13 @@ async function boucleDirect(d) {
         continue;
       }
       if (!d.actif) break;
-      const ev = evaluer(d, p, t, cam);
+      const ev = evaluer(d, p, t, cam, qualite, W, H);
       dessinerCalque(d, p, cam, W, H, ev.ok, ev.direction);
       if (ev.ok) {
-        await prendre(d, p, ev, W, H);
+        const refus = await prendre(d, p, ev, W, H);
         dessinerCalque(d, p, cam, W, H, false, ev.direction);
-        majDirect(d, d.mode === 'calib' ? 'Image prise' : 'Vue prise', 'ok');
+        if (refus) majDirect(d, refus, 'alerte');
+        else majDirect(d, d.mode === 'calib' ? 'Image prise' : 'Vue prise', 'ok');
       } else {
         majDirect(d, ev.consigne, ev.niveau);
       }

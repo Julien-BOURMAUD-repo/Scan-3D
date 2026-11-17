@@ -104,6 +104,10 @@ Les étapes 2 et 3 peuvent se faire caméra ouverte, sans passer par l'appareil 
   "Arrêter" garde les vues prises pour reprendre plus tard, "Terminer et reconstruire" lance
   l'aperçu sans attendre la couverture complète.
 
+En scan direct, une vue n'est acceptée que si l'objet y est correctement détouré : sinon la case
+de l'anneau ne se valide pas et la raison s'affiche aussitôt (objet non reconnu, trop sombre,
+trop loin, image floue, lumière trop forte). Il n'y a donc plus de vues rejetées après coup.
+
 La calibration en direct et la calibration par photos ne sont pas interchangeables (cadrage
 différent) : le scan en direct demande une calibration en direct, dans la même orientation du
 téléphone. La caméra en direct a une résolution plus faible que les photos : le mode photos
