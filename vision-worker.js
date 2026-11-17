@@ -456,7 +456,23 @@ function detourer(m) {
   // Pixels a cheval sur une transition noir / blanc : indetermines (flou, imprecision de pose)
   const net = new Int8Array(cls);
 
-  // Fond colore : une feuille de couleur vive posee au centre de la planche, sous l'objet.
+  for (let v = 1; v < mh - 1; v++) for (let u = 1; u < mw - 1; u++) {
+    const i = v * mw + u, c = cls[i];
+    if (c < 0) continue;
+    for (const d of [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1]) if (cls[i + d] !== c) { net[i] = -1; break; }
+  }
+
+  // Planche couleur : reconnue toute seule a la couleur des carres, meme sur une impression sombre
+  const surPlanche = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (planX[i] >= 0 && planX[i] < L && planY[i] >= 0 && planY[i] < Hb) surPlanche[i] = 1;
+  }
+  const couleur = detourerCouleur(rgba, net, dedans, surPlanche, !!env, mw, mh, 0.19);
+  if (couleur) return finirMasque(couleur, dedans, mw, mh, { sombre: false, colore: false, planche: 'couleur' }, rgba);
+
+  // Fond colore (planche noir et blanc seulement : sur une planche couleur, la planche elle-meme
+  // serait prise pour la feuille coloree et rien ne serait detoure) : une feuille de couleur vive
+  // posee au centre de la planche, sous l'objet.
   // Sur cette feuille, tout ce qui n'a pas sa couleur est l'objet (blanc, gris ou noir compris).
   let papier = null, memeTeinte = null;
   if (fondColore) {
@@ -492,19 +508,6 @@ function detourer(m) {
       if (planX[i] > bx0 && planX[i] < bx1 && planY[i] > by0 && planY[i] < by1) { papier[i] = 1; net[i] = -1; }
     }
   }
-  for (let v = 1; v < mh - 1; v++) for (let u = 1; u < mw - 1; u++) {
-    const i = v * mw + u, c = cls[i];
-    if (c < 0) continue;
-    for (const d of [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1]) if (cls[i + d] !== c) { net[i] = -1; break; }
-  }
-
-  // Planche couleur : reconnue toute seule a la couleur des carres, meme sur une impression sombre
-  const surPlanche = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    if (planX[i] >= 0 && planX[i] < L && planY[i] >= 0 && planY[i] < Hb) surPlanche[i] = 1;
-  }
-  const couleur = detourerCouleur(rgba, net, dedans, surPlanche, !!env, mw, mh, 0.19);
-  if (couleur) return finirMasque(couleur, dedans, mw, mh, { sombre: false, colore: false, planche: 'couleur' }, rgba);
 
   // Niveaux du blanc et du noir de la feuille, selon l'eclairage
   const blanc = ajusterNiveau(lum, net, 1, mw, mh, (l, f) => l > f * 0.85);

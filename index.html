@@ -147,6 +147,10 @@
   #message:empty { display: none; }
   body.direct-ouvert { overflow: hidden; }
   body.direct-ouvert #message { display: none; }
+  #pdf-fenetre { width: min(360px, calc(100vw - 32px)); border: 1px solid var(--ligne); border-radius: var(--rayon);
+    background: var(--carte); color: var(--texte); padding: 20px; }
+  #pdf-fenetre::backdrop { background: rgb(0 0 0 / 0.55); }
+  #pdf-fenetre h3 { margin: 0 0 8px; font-size: 1.1rem; }
   #direct { position: fixed; inset: 0; z-index: 20; background: #000; color: #fff; }
   #direct[hidden] { display: none; }
   #direct-video, #direct-calque { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -199,11 +203,11 @@
       <li><strong>Noir et blanc</strong> : imprimante sans couleur, objets nettement colorés.</li>
     </ul>
     <div class="boutons">
-      <a class="bouton" href="planche-couleur.pdf" target="_blank" rel="noopener" download>Bleu et jaune (PDF A4)</a>
-      <a class="bouton" href="planche-rouge-vert.pdf" target="_blank" rel="noopener" download>Rouge et vert (PDF A4)</a>
-      <a class="bouton secondaire" href="planche.pdf" target="_blank" rel="noopener" download>Noir et blanc</a>
+      <button class="bouton" type="button" data-pdf="planche-couleur.pdf" data-nom="Planche bleue et jaune">Bleu et jaune (PDF A4)</button>
+      <button class="bouton" type="button" data-pdf="planche-rouge-vert.pdf" data-nom="Planche rouge et verte">Rouge et vert (PDF A4)</button>
+      <button class="bouton secondaire" type="button" data-pdf="planche.pdf" data-nom="Planche noir et blanc">Noir et blanc</button>
     </div>
-    <p class="doux" style="margin-top:10px">Le PDF s'ouvre dans un nouvel onglet : le fermer pour revenir à l'appli. L'appli reconnaît toute seule la planche utilisée, et la calibration reste valable d'une planche à l'autre.</p>
+    <p class="doux" style="margin-top:10px">L'appli reconnaît toute seule la planche utilisée, et la calibration reste valable d'une planche à l'autre.</p>
     <div class="grille-champs">
       <label class="champ">Barre de contrôle mesurée (mm)
         <input id="r-barre" type="number" inputmode="decimal" step="0.1" min="90" max="110">
@@ -247,7 +251,7 @@
     </ul>
     <p class="doux">Le détourage compare chaque image au motif connu de la planche. Objet clair, fond assombri sur les vignettes : si la feuille reste claire autour de l'objet, exclure la vue.</p>
     <p class="doux">En direct : tourner lentement autour de l'objet. Une vue est prise dès que le téléphone est stable sur un angle pas encore couvert ; l'anneau dessiné sur la feuille autour de l'objet se colore au fur et à mesure (extérieur : vues rasantes, presque au ras de la table, indispensables pour la hauteur ; intérieur : vues du dessus). Quand tout l'anneau est vert, l'aperçu 3D s'affiche tout seul ; le bouton Terminer permet de s'arrêter avant.</p>
-    <label class="case"><input id="r-fond" type="checkbox"> Fond coloré : pour un objet blanc, gris ou noir, poser une feuille de couleur vive (environ 10 x 10 cm, d'une autre couleur que l'objet) au centre de la planche, sous l'objet</label>
+    <label class="case"><input id="r-fond" type="checkbox"> Fond coloré (planche noir et blanc uniquement, sans effet sur une planche couleur) : poser une feuille de couleur vive (environ 10 x 10 cm, d'une autre couleur que l'objet) au centre de la planche, sous l'objet</label>
     <div class="boutons">
       <button id="photos-direct" class="bouton" type="button" data-bloquable>Prise en direct</button>
       <label id="photos-ajouter" class="bouton secondaire" data-bloquable>
@@ -329,8 +333,17 @@
       <button id="stl-telecharger" class="bouton" type="button" data-bloquable>Télécharger le STL</button>
     </div>
   </section>
-  <p class="doux" style="text-align:center;margin:18px 0 0">Version 17</p>
+  <p class="doux" style="text-align:center;margin:18px 0 0">Version 19</p>
 </main>
+
+<dialog id="pdf-fenetre" aria-labelledby="pdf-titre">
+  <h3 id="pdf-titre"></h3>
+  <p id="pdf-etat" class="doux"></p>
+  <div class="boutons">
+    <button id="pdf-enregistrer" class="bouton" type="button" disabled>Imprimer ou enregistrer</button>
+    <button id="pdf-fermer" class="bouton secondaire" type="button">Fermer</button>
+  </div>
+</dialog>
 
 <div id="direct" hidden>
   <video id="direct-video" playsinline muted autoplay></video>
@@ -351,6 +364,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=17"></script>
+<script type="module" src="app.js?v=19"></script>
 </body>
 </html>

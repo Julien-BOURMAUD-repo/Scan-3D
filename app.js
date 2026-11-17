@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '17'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '19'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -1273,6 +1273,39 @@ async function afficher3D(pos, indices, recadrer) {
 
 /* ---------- Branchements ---------- */
 
+/* Planches : le PDF n'est jamais ouvert a la place de l'appli (depuis l'ecran d'accueil du
+   telephone, on ne pourrait plus revenir). Il est prepare dans une fenetre, puis remis au menu
+   de partage du telephone (Imprimer, Enregistrer dans Fichiers...), ou telecharge sur PC. */
+let planchePrete = null;
+
+async function ouvrirPlanche(btn) {
+  const dlg = $('pdf-fenetre');
+  planchePrete = null;
+  $('pdf-titre').textContent = btn.dataset.nom;
+  $('pdf-etat').textContent = 'Préparation du PDF...';
+  $('pdf-enregistrer').disabled = true;
+  dlg.showModal();
+  try {
+    const rep = await fetch(btn.dataset.pdf);
+    if (!rep.ok) throw new Error(`erreur ${rep.status}`);
+    planchePrete = new File([await rep.blob()], btn.dataset.pdf, { type: 'application/pdf' });
+    $('pdf-etat').textContent = 'Imprimer à 100 % (taille réelle, sans ajustement à la page), sur papier mat.';
+    $('pdf-enregistrer').disabled = false;
+  } catch (err) {
+    $('pdf-etat').textContent = 'PDF indisponible : ' + err.message;
+  }
+}
+
+function enregistrerPlanche() {
+  const f = planchePrete;
+  if (!f) return;
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    navigator.share({ files: [f], title: f.name }).catch(() => { /* partage annule */ });
+  } else {
+    telecharger(f, f.name);
+  }
+}
+
 function brancherFichiers(id, action) {
   $(id).addEventListener('change', (e) => {
     const fichiers = Array.from(e.target.files || []);
@@ -1288,6 +1321,14 @@ function demarrer() {
   brancherFichiers('calib-fichiers', calibrer);
   brancherFichiers('photos-fichiers', ajouterPhotos);
   brancherFichiers('calib-importer', (f) => importerCalib(f[0]));
+  document.querySelectorAll('[data-pdf]').forEach((b) => b.addEventListener('click', () => ouvrirPlanche(b)));
+  $('pdf-enregistrer').addEventListener('click', enregistrerPlanche);
+  $('pdf-fermer').addEventListener('click', () => $('pdf-fenetre').close());
+  $('pdf-fenetre').addEventListener('click', (e) => {
+    // Toucher en dehors de la fenetre la ferme aussi
+    const r = $('pdf-fenetre').getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) $('pdf-fenetre').close();
+  });
   $('calib-exporter').addEventListener('click', exporterCalib);
   $('calib-effacer').addEventListener('click', () => {
     etat.calib = null;
