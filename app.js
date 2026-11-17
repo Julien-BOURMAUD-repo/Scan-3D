@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '21'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '22'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -367,6 +367,7 @@ function majBoutons() {
   $('photos-ajouter').classList.toggle('desactive', etat.occupe || !etat.calib);
   $('photos-direct').disabled = etat.occupe || !etat.calib;
   $('photos-effacer').disabled = etat.occupe || !etat.vues.length;
+  $('photos-diagnostic').disabled = etat.occupe || !etat.vues.length;
 }
 
 function viderPhotos() {
@@ -411,6 +412,7 @@ async function ajouterPhotos(fichiers) {
         const ms = TAILLE_MASQUE / Math.max(W, H);
         vue.mw = Math.round(W * ms); vue.mh = Math.round(H * ms);
         const ext = extraire(bmp, vue.mw, vue.mh);
+        garderImage(vue, bmp);
         bmp.close(); bmp = null;
         const p = await vision.appel('pose', { gris, w: W, h: H, K: c.K, dist: c.dist }, [gris.buffer]);
         if (!p.R) throw new Error('Planche non détectée');
@@ -730,6 +732,7 @@ async function prendre(d, p, ev, W, H) {
   vue.canvas.getContext('2d').drawImage(d.toile, 0, 0, vue.canvas.width, vue.canvas.height);
   const ms = TAILLE_MASQUE / Math.max(W, H);
   vue.mw = Math.round(W * ms); vue.mh = Math.round(H * ms);
+  garderImage(vue, d.toile);
   try {
     await detourerVue(vue, extraire(d.toile, vue.mw, vue.mh), { K: etat.calib.K, dist: etat.calib.dist, W, H });
   } catch (err) {
@@ -1181,6 +1184,53 @@ function stlBinaire(pos, tri) {
   return new Blob([buf], { type: 'model/stl' });
 }
 
+/* Image de la vue a la resolution du masque, en JPEG (quelques dizaines de Ko), pour l'export d'analyse. */
+function garderImage(vue, source) {
+  try {
+    const c = document.createElement('canvas');
+    c.width = vue.mw; c.height = vue.mh;
+    c.getContext('2d').drawImage(source, 0, 0, vue.mw, vue.mh);
+    c.toBlob((b) => { vue.jpeg = b; }, 'image/jpeg', 0.85);
+  } catch (e) { /* export d'analyse seulement */ }
+}
+
+function enBase64(blob) {
+  return new Promise((ok, ko) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(',')[1]);
+    r.onerror = () => ko(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+/* Export d'analyse : calibration, reglages, et pour chaque vue sa pose, son masque et son image.
+   Permet de rejouer exactement le scan sur un PC pour comprendre un mauvais resultat. */
+async function exporterDiagnostic() {
+  const vues = etat.vues.filter((v) => v.etat === 'ok' && v.masque);
+  if (!vues.length) { message('Aucune vue détourée à exporter.', 'alerte'); return; }
+  message('Préparation de l\'export...', '');
+  const sortie = [];
+  for (const v of vues) {
+    const c = document.createElement('canvas');
+    c.width = v.mw; c.height = v.mh;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(v.mw, v.mh);
+    for (let i = 0; i < v.masque.length; i++) {
+      const g = v.masque[i] === 1 ? 255 : v.masque[i] === 2 ? 128 : 0;
+      img.data[4 * i] = img.data[4 * i + 1] = img.data[4 * i + 2] = g; img.data[4 * i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    const png = await new Promise((ok) => c.toBlob(ok, 'image/png'));
+    sortie.push({
+      nom: v.nom, actif: v.actif, R: v.R, t: v.t, n: v.n, err: v.err, mw: v.mw, mh: v.mh,
+      masque: await enBase64(png), image: v.jpeg ? await enBase64(v.jpeg) : null,
+    });
+  }
+  const donnees = { version: VERSION, date: new Date().toISOString(), calib: etat.calib, reglages: reglages(), facteur: facteurPlanche(), vues: sortie };
+  telecharger(new Blob([JSON.stringify(donnees)], { type: 'application/json' }), 'scan3d-analyse.json');
+  message(`Export prêt : ${sortie.length} vues.`, 'ok');
+}
+
 function telecharger(blob, nom) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1336,6 +1386,7 @@ function demarrer() {
     majBoutons();
   });
   $('photos-effacer').addEventListener('click', viderPhotos);
+  $('photos-diagnostic').addEventListener('click', exporterDiagnostic);
   $('calib-direct').addEventListener('click', () => ouvrirDirect('calib'));
   $('photos-direct').addEventListener('click', () => ouvrirDirect('scan'));
   $('direct-terminer').addEventListener('click', () => { if (direct) { direct.action = 'terminer'; direct.actif = false; } });

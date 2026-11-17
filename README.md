@@ -128,6 +128,12 @@ différent) : le scan en direct demande une calibration en direct, dans la même
 téléphone. La caméra en direct a une résolution plus faible que les photos : le mode photos
 reste un peu plus précis.
 
+## Export pour analyse
+
+Le bouton "Exporter pour analyse" (étape 3) enregistre un fichier `scan3d-analyse.json` (environ
+7 Mo pour 50 vues) : calibration, réglages, et pour chaque vue sa pose, son masque et une image
+réduite. Il permet de rejouer le scan à l'identique sur un PC pour comprendre un mauvais résultat.
+
 ## Objets blancs, gris ou noirs
 
 Sur la planche noir et blanc, un objet sans couleur se confond avec le damier. Deux solutions :
