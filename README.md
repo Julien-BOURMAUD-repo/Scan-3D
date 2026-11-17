@@ -123,6 +123,10 @@ la calibration, le cadre suit directement les coins détectés (la caméra n'est
 Une erreur au-dessus de 1 px vient presque toujours d'une feuille qui n'est pas plane : la coller
 sur un carton, ne pas la poser sur une pile de papier.
 
+Pour rester fluide, le suivi de la planche se fait sur une image réduite de moitié ; l'image
+pleine résolution n'est analysée qu'au moment de prendre une vue (ou quand la planche, lointaine ou
+très inclinée, n'est pas trouvée à mi-résolution). Pendant cette analyse, garder le téléphone immobile.
+
 La calibration en direct et la calibration par photos ne sont pas interchangeables (cadrage
 différent) : le scan en direct demande une calibration en direct, dans la même orientation du
 téléphone. La caméra en direct a une résolution plus faible que les photos : le mode photos

@@ -6,12 +6,13 @@ const TAILLE_MASQUE = 800;
 const TAILLE_SEG = 1024;
 const MIN_VUES = 8;
 const ERREUR_POSE_MAX = 2.0;
+const ECHELLE_SUIVI = 2; // reduction de l'image pour le suivi en direct
 const MODELE_DEFAUT = 'https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model_quantized.onnx';
 const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '22'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '23'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -308,6 +309,11 @@ function dessinerMasque(vue) {
 }
 
 /* Matrice de la camera ramenee a la resolution des masques. */
+/* Matrice de la camera pour une image reduite d'un facteur f. */
+function kEchelle(K, f) {
+  return [K[0] / f, K[1] / f, (K[2] + 0.5) / f - 0.5, 0, K[4] / f, (K[5] + 0.5) / f - 0.5, 0, 0, 1];
+}
+
 function kMasque(K, W, H, mw, mh) {
   const sx = mw / W, sy = mh / H;
   const k = K.slice();
@@ -586,7 +592,8 @@ function evaluer(d, p, t, cam, qualite, W, H) {
     return { direction, consigne: 'Stabiliser le téléphone', niveau: '' };
   }
   // En calibration, la distorsion n'est pas encore connue : l'erreur de pose n'est pas un critere
-  if (!calib && p.err > ERREUR_POSE_MAX) {
+  // (suivi sur image reduite, moins precise : marge de 50 %, la pose pleine resolution est verifiee a la prise)
+  if (!calib && p.err > 1.5 * ERREUR_POSE_MAX) {
     return { direction, consigne: 'Image peu nette : stabiliser le téléphone', niveau: 'alerte' };
   }
   const c = caseDe(direction);
@@ -843,6 +850,8 @@ async function ouvrirDirect(mode) {
 
 async function boucleDirect(d) {
   const ctx = d.toile.getContext('2d', { willReadFrequently: true });
+  d.petite = document.createElement('canvas');
+  const ctxp = d.petite.getContext('2d', { willReadFrequently: true });
   try {
     while (d.actif) {
       const v = d.video;
@@ -852,23 +861,53 @@ async function boucleDirect(d) {
       if (d.toile.width !== W || d.toile.height !== H) { d.toile.width = W; d.toile.height = H; d.precedent = null; }
       const cam = cameraDirect(d, W, H);
       if (cam.erreur) { majDirect(d, cam.erreur, 'alerte'); dessinerCalque(d, null); await pause(400); continue; }
-      ctx.drawImage(v, 0, 0, W, H);
+      // Suivi sur une image reduite de moitie : detection 2 a 3 fois plus rapide, affichage fluide.
+      // La pleine resolution n'est analysee qu'au moment de prendre une vue.
+      const W2 = Math.round(W / ECHELLE_SUIVI), H2 = Math.round(H / ECHELLE_SUIVI), f = W / W2;
+      if (d.petite.width !== W2 || d.petite.height !== H2) { d.petite.width = W2; d.petite.height = H2; }
+      ctxp.drawImage(v, 0, 0, W2, H2);
       const t = performance.now();
-      const gris = versGris(ctx.getImageData(0, 0, W, H).data);
-      const qualite = mesurerQualite(d, gris, W, H);
-      let p;
+      const gris = versGris(ctxp.getImageData(0, 0, W2, H2).data);
+      const qualite = mesurerQualite(d, gris, W2, H2);
+      let p, ech = f;
       try {
-        p = await vision.appel('pose', { gris, w: W, h: H, K: cam.K, dist: cam.dist, homographie: d.mode === 'calib' }, [gris.buffer]);
+        p = await vision.appel('pose', { gris, w: W2, h: H2, K: kEchelle(cam.K, f), dist: cam.dist, homographie: d.mode === 'calib' }, [gris.buffer]);
+        if ((!p.R || p.n < (d.mode === 'calib' ? DIRECT.calibCoinsMin : DIRECT.coinsMin)) && d.actif) {
+          // Planche lointaine ou tres inclinee (vues rasantes) : marqueurs trop petits a mi-resolution,
+          // pas ou trop peu de coins detectes : on reessaie en pleine resolution
+          ctx.drawImage(v, 0, 0, W, H);
+          const g = versGris(ctx.getImageData(0, 0, W, H).data);
+          p = await vision.appel('pose', { gris: g, w: W, h: H, K: cam.K, dist: cam.dist, homographie: d.mode === 'calib' }, [g.buffer]);
+          ech = 1;
+        }
       } catch (err) {
         majDirect(d, 'Erreur d\'analyse : ' + err.message, 'alerte');
         await pause(300);
         continue;
       }
       if (!d.actif) break;
+      // Coins, erreur et homographie ramenes en pixels pleine resolution
+      if (ech !== 1) {
+        if (p.coins) p.coins.pts = p.coins.pts.map((x) => x * ech);
+        if (p.err) p.err *= ech;
+        if (p.Hm) for (let k = 0; k < 6; k++) p.Hm[k] *= ech;
+      }
       const ev = evaluer(d, p, t, cam, qualite, W, H);
       dessinerCalque(d, p, cam, W, H, ev.ok, ev.direction);
       if (ev.ok) {
-        const refus = await prendre(d, p, ev, W, H);
+        majDirect(d, 'Analyse de la vue : rester immobile...', '');
+        ctx.drawImage(v, 0, 0, W, H);
+        const grisPlein = versGris(ctx.getImageData(0, 0, W, H).data);
+        let pp = null;
+        try {
+          pp = await vision.appel('pose', { gris: grisPlein, w: W, h: H, K: cam.K, dist: cam.dist }, [grisPlein.buffer]);
+        } catch (err) { pp = null; }
+        if (!d.actif) break;
+        if (!pp || !pp.R || (d.mode !== 'calib' && pp.err > ERREUR_POSE_MAX)) {
+          majDirect(d, 'Image peu nette : stabiliser le téléphone', 'alerte');
+          continue;
+        }
+        const refus = await prendre(d, pp, ev, W, H);
         dessinerCalque(d, p, cam, W, H, false, ev.direction);
         if (refus) { compterRefus(d, refus); majDirect(d, refus, 'alerte'); }
         else majDirect(d, d.mode === 'calib' ? 'Image prise' : 'Vue prise', 'ok');

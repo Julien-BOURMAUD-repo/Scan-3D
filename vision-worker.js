@@ -216,11 +216,8 @@ function detourerCouleur(rgba, net, dedans, surPlanche, hullConnu, mw, mh, sinMi
   // References affinees par etapes : on part de la couleur d'ensemble avec un tri strict (l'objet,
   // meme gris, est ecarte), puis chaque etape repart de la reference locale precedente, ce qui
   // permet de suivre le voile du papier de proche en proche sans jamais absorber l'objet.
-  let loc = refLocales(rgba, net, surPlanche, mw, mh, (k, u, v, o) => { o[0] = cl[k].dir[0]; o[1] = cl[k].dir[1]; o[2] = cl[k].dir[2]; }, 0.15);
-  for (let etape = 0; etape < 3; etape++) {
-    const prec = loc;
-    loc = refLocales(rgba, net, surPlanche, mw, mh, (k, u, v, o) => refEn(prec, k, u, v, o), 0.15);
-  }
+  let loc = refLocales(rgba, net, surPlanche, mw, mh, null, cl, 0.15);
+  for (let etape = 0; etape < 3; etape++) loc = refLocales(rgba, net, surPlanche, mw, mh, loc, cl, 0.15);
   const masque = new Uint8Array(n);
   const att = [0, 0, 0];
   for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
@@ -256,25 +253,45 @@ const CELLULE = 48; // cote d'une cellule de reference locale, en pixels du masq
 /* Couleur de reference de chaque classe de carres, mesuree cellule par cellule. Le papier
    imprime renvoie un voile de lumiere qui s'ajoute aux couleurs et varie d'un endroit a l'autre
    de la feuille : une reference locale le suit, la ou une couleur d'ensemble se trompe.
-   Les cellules sans mesure (cachees par l'objet) heritent de leurs voisines. */
-function refLocales(rgba, net, surPlanche, mw, mh, refCourante, rejet) {
-  const att = [0, 0, 0];
+   Les cellules sans mesure (cachees par l'objet) heritent de leurs voisines.
+   Un pixel sur deux dans chaque direction suffit a ces moyennes (4 fois moins de calcul). Le tri
+   des pixels d'objet se fait sur la direction de couleur de la cellule a l'etape precedente
+   (prec), ou sur la couleur d'ensemble de la classe (cl) a la premiere etape. */
+const PAS_REF = 2;
+function refLocales(rgba, net, surPlanche, mw, mh, prec, cl, rejet) {
   const gw = Math.ceil(mw / CELLULE), gh = Math.ceil(mh / CELLULE), ng = gw * gh;
   const ref = [0, 1].map(() => ({ c: new Float32Array(ng * 3), n: new Int32Array(ng) }));
-  for (let v = 0; v < mh; v++) for (let u = 0; u < mw; u++) {
-    const i = v * mw + u, k = net[i];
-    if (k < 0 || !surPlanche[i]) continue;
-    const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
-    if (r >= 250 || g >= 250 || b >= 250) continue;
-    refCourante(k, u, v, att);
-    if (residuPerp(r, g, b, att) > rejet * Math.hypot(r, g, b)) continue; // objet : ecarte
-    const c = ((v / CELLULE) | 0) * gw + ((u / CELLULE) | 0), a = ref[k];
-    a.c[3 * c] += r; a.c[3 * c + 1] += g; a.c[3 * c + 2] += b;
-    a.n[c]++;
+  // Directions de reference normalisees, par cellule
+  const dirs = [0, 1].map((k) => {
+    const d = new Float32Array(ng * 3);
+    for (let c = 0; c < ng; c++) {
+      const a = prec ? prec.ref[k].c : null;
+      const x = a ? a[3 * c] : cl[k].dir[0], y = a ? a[3 * c + 1] : cl[k].dir[1], z = a ? a[3 * c + 2] : cl[k].dir[2];
+      const nn = Math.hypot(x, y, z) || 1;
+      d[3 * c] = x / nn; d[3 * c + 1] = y / nn; d[3 * c + 2] = z / nn;
+    }
+    return d;
+  });
+  for (let v = 0; v < mh; v += PAS_REF) {
+    const lig = ((v / CELLULE) | 0) * gw;
+    for (let u = 0; u < mw; u += PAS_REF) {
+      const i = v * mw + u, k = net[i];
+      if (k < 0 || !surPlanche[i]) continue;
+      const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
+      if (r >= 250 || g >= 250 || b >= 250) continue;
+      const c = lig + ((u / CELLULE) | 0), d = dirs[k];
+      const proj = r * d[3 * c] + g * d[3 * c + 1] + b * d[3 * c + 2];
+      const er = r - proj * d[3 * c], eg = g - proj * d[3 * c + 1], eb = b - proj * d[3 * c + 2];
+      if (er * er + eg * eg + eb * eb > rejet * rejet * (r * r + g * g + b * b)) continue; // objet : ecarte
+      const a = ref[k];
+      a.c[3 * c] += r; a.c[3 * c + 1] += g; a.c[3 * c + 2] += b;
+      a.n[c]++;
+    }
   }
+  const nMin = Math.ceil(25 / (PAS_REF * PAS_REF));
   for (const a of ref) {
     for (let c = 0; c < ng; c++) {
-      if (a.n[c] >= 25) { a.c[3 * c] /= a.n[c]; a.c[3 * c + 1] /= a.n[c]; a.c[3 * c + 2] /= a.n[c]; a.n[c] = 1; }
+      if (a.n[c] >= nMin) { a.c[3 * c] /= a.n[c]; a.c[3 * c + 1] /= a.n[c]; a.c[3 * c + 2] /= a.n[c]; a.n[c] = 1; }
       else { a.n[c] = 0; }
     }
     // Cellules sans mesure : moyenne des voisines deja connues, de proche en proche
@@ -474,11 +491,11 @@ function detourer(m) {
   }
   // Pixels a cheval sur une transition noir / blanc : indetermines (flou, imprecision de pose)
   const net = new Int8Array(cls);
-
+  const voisins = [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1];
   for (let v = 1; v < mh - 1; v++) for (let u = 1; u < mw - 1; u++) {
     const i = v * mw + u, c = cls[i];
     if (c < 0) continue;
-    for (const d of [-1, 1, -mw, mw, -mw - 1, -mw + 1, mw - 1, mw + 1]) if (cls[i + d] !== c) { net[i] = -1; break; }
+    for (let q = 0; q < 8; q++) if (cls[i + voisins[q]] !== c) { net[i] = -1; break; }
   }
 
   // Planche couleur : reconnue toute seule a la couleur des carres, meme sur une impression sombre
