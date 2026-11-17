@@ -318,8 +318,8 @@
       <button id="d-aligner" class="bouton secondaire" type="button" data-bloquable>Aligner sur les axes</button>
       <button id="d-reinit" class="bouton secondaire" type="button" data-bloquable>Revenir au scan</button>
     </div>
-    <label class="champ" style="margin-top:14px">Seuil de détection : <strong id="d-seuil-valeur">60 %</strong>
-      <input id="d-seuil" type="range" min="0" max="95" step="5" value="60" data-bloquable>
+    <label class="champ" style="margin-top:14px">Seuil de détection : <strong id="d-seuil-valeur">0 %</strong>
+      <input id="d-seuil" type="range" min="0" max="95" step="5" value="0" data-bloquable>
     </label>
     <p class="doux" style="margin-top:4px">Chaque point du volume a un score : la part des vues qui le voient comme objet. Monter le seuil enlève les débris et artefacts ; le baisser si des morceaux de l'objet disparaissent (objet sombre). 0 % : aucun filtrage.</p>
     <div class="ligne-coupe">
@@ -333,7 +333,7 @@
       <button id="stl-telecharger" class="bouton" type="button" data-bloquable>Télécharger le STL</button>
     </div>
   </section>
-  <p class="doux" style="text-align:center;margin:18px 0 0">Version 20</p>
+  <p class="doux" style="text-align:center;margin:18px 0 0">Version 21</p>
 </main>
 
 <dialog id="pdf-fenetre" aria-labelledby="pdf-titre">
@@ -364,6 +364,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=20"></script>
+<script type="module" src="app.js?v=21"></script>
 </body>
 </html>

@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '20'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '21'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -968,7 +968,7 @@ async function reconstruire() {
       vues: actives.map((v) => ({ R: v.R, t: v.t.map((x) => x * f), masque: v.masque })),
       mw, mh, K, dist: c.dist, centre,
       params: { voxel: r.voxel, emprise: r.emprise, hauteur: r.hauteur, tolerance: r.tolerance, lissage: r.lissage },
-      seuil: 0.6,
+      seuil: 0, // seuil de detection desactive par defaut : reglable a la main apres coup
     });
     const duree = (performance.now() - t0) / 1000;
     etat.modele = { base: res.positions, indices: res.indices, angle: 0, facteurs: [1, 1, 1] };
@@ -978,7 +978,6 @@ async function reconstruire() {
     $('resultat').hidden = false;
     await majModele(true);
     let txt = `Reconstruction terminée en ${fmt(duree, 1)} s avec ${actives.length} vues (${res.indices.length / 3} triangles).`;
-    if (!res.fiable) txt += ' Objet sombre ou peu contrasté : seuil de détection laissé à 0 %, à régler à la main si besoin.';
     if (res.bord) txt += ' Attention : l\'objet touche le bord du volume de travail, augmenter l\'emprise ou la hauteur, ou vérifier les masques.';
     // Objet quasi absent du resultat : les vues l'ont pris pour du fond (couleur de la planche, reflets)
     const minuscule = Math.max(...dimensions(etat.modele.base)) < 5;

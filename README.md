@@ -81,10 +81,9 @@ avancés, mais il a tendance à prendre toute la feuille pour l'objet.
    - Saisir les cotes mesurées au pied à coulisse dans la colonne Final, puis "Appliquer les cotes".
      Case "Proportionnel" cochée : une seule cote suffit, les deux autres suivent.
      Décochée : chaque axe est corrigé indépendamment.
-   - "Seuil de détection" : chaque point du volume a un score, la part des vues qui le voient
-     comme objet. Seuls les points dont le score atteint le seuil (en % du score typique de
-     l'objet) sont gardés. Monter le seuil enlève débris et artefacts. Réglé automatiquement :
-     60 % si les scores sont fiables (objet coloré), 0 % sinon (objet sombre).
+   - "Seuil de détection" (0 % par défaut) : chaque point du volume a un score, la part des vues
+     qui le voient comme objet. Monter le seuil ne garde que les points les mieux vus et enlève des
+     débris, mais peut aussi ronger un objet blanc ou brillant, souvent vu comme indéterminé.
    - "Couper à la hauteur" pour un objet à dessus plat, dont la hauteur est surestimée par la méthode.
    - "Télécharger le STL" : fichier en mm, posé sur Z = 0, centré en X/Y.
 

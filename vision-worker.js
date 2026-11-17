@@ -314,31 +314,50 @@ function refEn(loc, k, u, v, sortie) {
 /* Pixels dont le rayon manque la feuille (code 6). Ce n'est en general que la table : du fond,
    ce qui permet de retirer le volume a cet endroit. Exception : un objet haut, vu de biais, qui
    depasse du bord de la feuille. Ce prolongement touche l'objet vu sur la planche et en a la
-   couleur : on le retrouve en partant de l'objet, de proche en proche. */
+   couleur : on le retrouve en partant de l'objet, de proche en proche.
+   On part seulement du plus grand morceau d'objet (pas d'un reflet isole au bord de la planche),
+   et ce qui est retrouve est laisse indetermine, sans compter comme objet : avec un objet blanc,
+   la marge blanche de la feuille et une table claire ont sa couleur, et la propagation peut s'y
+   etendre. Indetermine, cela ne retire rien a l'objet et n'ajoute rien de faux. */
 function resoudreHorsFeuille(masque, rgba, mw, mh) {
   const n = mw * mh;
   let present = false;
   for (let i = 0; i < n; i++) if (masque[i] === 6) { present = true; break; }
   if (!present) return;
-  const h = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
-  let total = 0;
-  for (let i = 0; i < n; i++) {
-    if (masque[i] !== 1) continue;
-    h[0][rgba[4 * i]]++; h[1][rgba[4 * i + 1]]++; h[2][rgba[4 * i + 2]]++;
-    total++;
-  }
-  if (total >= 50) {
-    const med = h.map((c) => { let k = 0; for (let v = 0; v < 256; v++) { k += c[v]; if (k >= total / 2) return v; } return 255; });
-    const tol = 0.3 * Math.hypot(med[0], med[1], med[2]) + 20;
-    const file = new Int32Array(n);
+  // Plus grand morceau d'objet (connexite 4)
+  const comp = new Int32Array(n).fill(-1);
+  const file = new Int32Array(n);
+  let meilleur = -1, tailleMax = 0;
+  for (let s = 0, id = 0; s < n; s++) {
+    if (masque[s] !== 1 || comp[s] >= 0) continue;
     let tete = 0, queue = 0;
-    for (let i = 0; i < n; i++) if (masque[i] === 1) file[queue++] = i;
+    file[queue++] = s; comp[s] = id;
+    while (tete < queue) {
+      const i = file[tete++], u = i % mw;
+      for (const j of [u > 0 ? i - 1 : -1, u < mw - 1 ? i + 1 : -1, i - mw, i + mw]) {
+        if (j < 0 || j >= n || masque[j] !== 1 || comp[j] >= 0) continue;
+        comp[j] = id; file[queue++] = j;
+      }
+    }
+    if (queue > tailleMax) { tailleMax = queue; meilleur = id; }
+    id++;
+  }
+  if (tailleMax >= 50) {
+    const h = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+    for (let i = 0; i < n; i++) {
+      if (comp[i] !== meilleur) continue;
+      h[0][rgba[4 * i]]++; h[1][rgba[4 * i + 1]]++; h[2][rgba[4 * i + 2]]++;
+    }
+    const med = h.map((c) => { let k = 0; for (let v = 0; v < 256; v++) { k += c[v]; if (k >= tailleMax / 2) return v; } return 255; });
+    const tol = 0.3 * Math.hypot(med[0], med[1], med[2]) + 20;
+    let tete = 0, queue = 0;
+    for (let i = 0; i < n; i++) if (comp[i] === meilleur) file[queue++] = i;
     while (tete < queue) {
       const i = file[tete++], u = i % mw;
       for (const j of [u > 0 ? i - 1 : -1, u < mw - 1 ? i + 1 : -1, i - mw, i + mw]) {
         if (j < 0 || j >= n || masque[j] !== 6) continue;
         const dr = rgba[4 * j] - med[0], dg = rgba[4 * j + 1] - med[1], db = rgba[4 * j + 2] - med[2];
-        if (Math.hypot(dr, dg, db) < tol) { masque[j] = 1; file[queue++] = j; }
+        if (Math.hypot(dr, dg, db) < tol) { masque[j] = 2; file[queue++] = j; }
       }
     }
   }
