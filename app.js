@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '15'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '17'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -980,7 +980,14 @@ async function reconstruire() {
     let txt = `Reconstruction terminée en ${fmt(duree, 1)} s avec ${actives.length} vues (${res.indices.length / 3} triangles).`;
     if (!res.fiable) txt += ' Objet sombre ou peu contrasté : seuil de détection laissé à 0 %, à régler à la main si besoin.';
     if (res.bord) txt += ' Attention : l\'objet touche le bord du volume de travail, augmenter l\'emprise ou la hauteur, ou vérifier les masques.';
-    message(txt, res.bord ? 'alerte' : 'ok');
+    // Objet quasi absent du resultat : les vues l'ont pris pour du fond (couleur de la planche, reflets)
+    const minuscule = Math.max(...dimensions(etat.modele.base)) < 5;
+    if (minuscule) {
+      txt = `Reconstruction ratée : il ne reste presque rien de l'objet (${actives.length} vues). Sur les vignettes, l'objet est assombri comme le fond : `
+        + 'sa couleur est trop proche de celle des carrés, '
+        + 'ou il est trop brillant. Changer de planche (objet bleu ou jaune : planche rouge et verte ; objet rouge ou vert : planche bleue et jaune), ou matifier l\'objet.';
+    }
+    message(txt, res.bord || minuscule ? 'alerte' : 'ok');
     $('resultat').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
     message('Reconstruction : ' + err.message, 'erreur');

@@ -192,12 +192,18 @@
 <main>
   <section class="carte" aria-labelledby="t-planche">
     <h2 id="t-planche"><span class="num">1</span>Planche de référence</h2>
-    <p>Imprimer la planche en taille réelle (100 %, sans ajustement à la page), la coller bien à plat sur un support rigide, puis mesurer la barre de contrôle au pied à coulisse.</p>
+    <p>Choisir la planche selon la couleur de l'objet : il ne doit pas avoir la couleur des carrés. Imprimer en taille réelle (100 %, sans ajustement à la page) sur papier mat, la coller bien à plat sur un carton, puis mesurer la barre de contrôle au pied à coulisse.</p>
+    <ul class="consignes">
+      <li><strong>Bleu et jaune</strong> : objets blancs, gris, noirs, rouges, verts.</li>
+      <li><strong>Rouge et vert</strong> : objets bleus, jaunes, blancs, gris, noirs.</li>
+      <li><strong>Noir et blanc</strong> : imprimante sans couleur, objets nettement colorés.</li>
+    </ul>
     <div class="boutons">
-      <a class="bouton" href="planche-couleur.pdf" download>Planche couleur (PDF A4)</a>
-      <a class="bouton secondaire" href="planche.pdf" download>Planche noir et blanc</a>
+      <a class="bouton" href="planche-couleur.pdf" target="_blank" rel="noopener" download>Bleu et jaune (PDF A4)</a>
+      <a class="bouton" href="planche-rouge-vert.pdf" target="_blank" rel="noopener" download>Rouge et vert (PDF A4)</a>
+      <a class="bouton secondaire" href="planche.pdf" target="_blank" rel="noopener" download>Noir et blanc</a>
     </div>
-    <p class="doux" style="margin-top:10px">Planche couleur (imprimante couleur) : conseillée, elle permet de scanner aussi les objets blancs, gris ou noirs. Éviter seulement les objets bleu foncé ou jaunes. L'appli reconnaît toute seule la planche utilisée ; la calibration reste valable d'une planche à l'autre.</p>
+    <p class="doux" style="margin-top:10px">Le PDF s'ouvre dans un nouvel onglet : le fermer pour revenir à l'appli. L'appli reconnaît toute seule la planche utilisée, et la calibration reste valable d'une planche à l'autre.</p>
     <div class="grille-champs">
       <label class="champ">Barre de contrôle mesurée (mm)
         <input id="r-barre" type="number" inputmode="decimal" step="0.1" min="90" max="110">
@@ -323,7 +329,7 @@
       <button id="stl-telecharger" class="bouton" type="button" data-bloquable>Télécharger le STL</button>
     </div>
   </section>
-  <p class="doux" style="text-align:center;margin:18px 0 0">Version 15</p>
+  <p class="doux" style="text-align:center;margin:18px 0 0">Version 17</p>
 </main>
 
 <div id="direct" hidden>
@@ -345,6 +351,6 @@
 
 <div id="message" role="status" aria-live="polite"></div>
 
-<script type="module" src="app.js?v=15"></script>
+<script type="module" src="app.js?v=17"></script>
 </body>
 </html>
