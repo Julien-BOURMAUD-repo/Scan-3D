@@ -107,6 +107,20 @@ Les étapes 2 et 3 peuvent se faire caméra ouverte, sans passer par l'appareil 
 En scan direct, une vue n'est acceptée que si l'objet y est correctement détouré : sinon la case
 de l'anneau ne se valide pas et la raison s'affiche aussitôt (objet non reconnu, trop sombre,
 trop loin, image floue, lumière trop forte). Il n'y a donc plus de vues rejetées après coup.
+Les 4 dernières vues refusées restent dans la grille, en rouge, avec leur masque : on voit
+ce que l'appli a pris pour l'objet. À l'arrêt, le message indique les blocages les plus fréquents.
+
+La caméra en direct est toujours l'objectif principal du téléphone : sur un iPhone à plusieurs
+objectifs, la caméra par défaut peut basculer seule vers le grand-angle selon la distance, ce
+qui rendrait la calibration fausse une image sur deux. Le nom de la caméra est enregistré avec
+la calibration ; le scan prévient si elle diffère.
+
+Calibration en direct : une image n'est prise que téléphone immobile (40 px/s au plus, contre
+120 pour le scan), car le capteur lit l'image ligne par ligne et un mouvement la déforme. Les
+images dont l'erreur dépasse nettement la médiane sont écartées et le calcul est refait. Pendant
+la calibration, le cadre suit directement les coins détectés (la caméra n'est pas encore connue).
+Une erreur au-dessus de 1 px vient presque toujours d'une feuille qui n'est pas plane : la coller
+sur un carton, ne pas la poser sur une pile de papier.
 
 La calibration en direct et la calibration par photos ne sont pas interchangeables (cadrage
 différent) : le scan en direct demande une calibration en direct, dans la même orientation du

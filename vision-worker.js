@@ -41,15 +41,17 @@ function detecter(gris, w, h) {
     const n = ci.rows * ci.cols;
     const obj = new Float64Array(n * 3);
     const pts = new Float64Array(n * 2);
+    const ids = new Int32Array(n);
     const par = cfg.nx - 1;
     for (let k = 0; k < n; k++) {
       const id = ci.data32S[k];
+      ids[k] = id;
       obj[3 * k] = ((id % par) + 1) * cfg.carre;
       obj[3 * k + 1] = (Math.floor(id / par) + 1) * cfg.carre;
       pts[2 * k] = cc.data32F[2 * k];
       pts[2 * k + 1] = cc.data32F[2 * k + 1];
     }
-    return { n, obj, pts };
+    return { n, obj, pts, ids };
   } finally {
     img.delete(); cc.delete(); ci.delete(); mc.delete(); mi.delete();
   }
@@ -71,13 +73,24 @@ function pose(m) {
   const det = detecter(m.gris, m.w, m.h);
   derniereDetection = det;
   if (det.n < 8) return { n: det.n };
+  // Coins detectes : servent a mesurer le mouvement du telephone sans passer par la pose
+  const coins = { ids: Array.from(det.ids), pts: Array.from(det.pts) };
+  // Homographie planche -> image : cadre fidele a la planche visible, meme sans calibration
+  let Hm = null;
+  if (m.homographie) {
+    const src = cv.matFromArray(det.n, 2, cv.CV_64F, Array.from({ length: det.n * 2 }, (_, i) => det.obj[3 * (i >> 1) + (i & 1)]));
+    const dst = cv.matFromArray(det.n, 2, cv.CV_64F, Array.from(det.pts));
+    const h = cv.findHomography(src, dst, 0);
+    if (h && h.rows === 3) Hm = Array.from(h.data64F);
+    [src, dst, h].forEach((x) => x && x.delete());
+  }
   const objM = cv.matFromArray(det.n, 3, cv.CV_64F, Array.from(det.obj));
   const imgM = cv.matFromArray(det.n, 2, cv.CV_64F, Array.from(det.pts));
   const K = cv.matFromArray(3, 3, cv.CV_64F, m.K);
   const D = cv.matFromArray(1, 5, cv.CV_64F, m.dist.slice(0, 5));
   const rv = new cv.Mat(), tv = new cv.Mat(), Rm = new cv.Mat();
   try {
-    if (!cv.solvePnP(objM, imgM, K, D, rv, tv, false, 0)) return { n: det.n };
+    if (!cv.solvePnP(objM, imgM, K, D, rv, tv, false, 0)) return { n: det.n, coins, Hm };
     cv.Rodrigues(rv, Rm);
     const R = Array.from(Rm.data64F);
     const t = Array.from(tv.data64F);
@@ -86,7 +99,7 @@ function pose(m) {
       const [u, v] = projeter(R, t, m.K, m.dist, det.obj[3 * k], det.obj[3 * k + 1], 0);
       s += (u - det.pts[2 * k]) ** 2 + (v - det.pts[2 * k + 1]) ** 2;
     }
-    return { n: det.n, R, t, err: Math.sqrt(s / det.n) };
+    return { n: det.n, R, t, err: Math.sqrt(s / det.n), coins, Hm };
   } finally {
     [objM, imgM, K, D, rv, tv, Rm].forEach((x) => x.delete());
   }
@@ -551,10 +564,12 @@ function detourer(m) {
   return finirMasque(masque, dedans, mw, mh, { sombre: objetSombre, colore: objetColore, planche: 'noir et blanc' }, rgba);
 }
 
-function calibrer(w, h) {
+/* Calibration sur une selection d'images. k3 est fixe a 0 : sur un telephone la distorsion est
+   faible et deja en partie corrigee, et un k3 libre deforme les bords de l'image. */
+function calibrerSur(sel, w, h) {
   const objV = new cv.MatVector(), imgV = new cv.MatVector();
   const mats = [];
-  for (let i = 0; i < calibObj.length; i++) {
+  for (const i of sel) {
     const n = calibObj[i].length / 3;
     const o = cv.matFromArray(n, 3, cv.CV_32F, Array.from(calibObj[i]));
     const p = cv.matFromArray(n, 2, cv.CV_32F, Array.from(calibImg[i]));
@@ -564,13 +579,31 @@ function calibrer(w, h) {
   const s1 = new cv.Mat(), s2 = new cv.Mat(), pe = new cv.Mat();
   try {
     const crit = new cv.TermCriteria(cv.TermCriteria_COUNT + cv.TermCriteria_EPS, 50, 1e-7);
-    const rms = cv.calibrateCameraExtended(objV, imgV, new cv.Size(w, h), K, D, rv, tv, s1, s2, pe, 0, crit);
+    const drapeaux = cv.CALIB_FIX_K3 !== undefined ? cv.CALIB_FIX_K3 : 128;
+    const rms = cv.calibrateCameraExtended(objV, imgV, new cv.Size(w, h), K, D, rv, tv, s1, s2, pe, drapeaux, crit);
     const dist = Array.from(D.data64F).slice(0, 5);
     while (dist.length < 5) dist.push(0);
     return { rms, K: Array.from(K.data64F), dist, parVue: Array.from(pe.data64F) };
   } finally {
     [objV, imgV, K, D, rv, tv, s1, s2, pe, ...mats].forEach((x) => x.delete());
   }
+}
+
+/* Les images bougees (flou, obturateur deroulant) ou prises sur une feuille soulevee faussent
+   toute la calibration : elles sont retirees tant que leur erreur depasse nettement la mediane. */
+function calibrer(w, h) {
+  let sel = calibObj.map((_, i) => i);
+  let r = calibrerSur(sel, w, h);
+  for (let tour = 0; tour < 3; tour++) {
+    const tri = r.parVue.slice().sort((a, b) => a - b);
+    const med = tri[tri.length >> 1];
+    const seuil = Math.max(0.5, 1.8 * med);
+    const garde = sel.filter((_, k) => r.parVue[k] <= seuil);
+    if (garde.length === sel.length || garde.length < 8) break;
+    sel = garde;
+    r = calibrerSur(sel, w, h);
+  }
+  return { ...r, images: sel.length, retirees: calibObj.length - sel.length };
 }
 
 self.onmessage = async (e) => {
