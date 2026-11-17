@@ -11,7 +11,7 @@ const CLE_CALIB = 'scan3d.calibration';
 const CLE_REGLAGES = 'scan3d.reglages';
 const AXES = ['x', 'y', 'z'];
 
-const VERSION = '19'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
+const VERSION = '20'; // a augmenter a chaque mise en ligne : evite de melanger anciens et nouveaux fichiers en cache
 const $ = (id) => document.getElementById(id);
 
 function lire(cle) {
@@ -985,7 +985,7 @@ async function reconstruire() {
     if (minuscule) {
       txt = `Reconstruction ratée : il ne reste presque rien de l'objet (${actives.length} vues). Sur les vignettes, l'objet est assombri comme le fond : `
         + 'sa couleur est trop proche de celle des carrés, '
-        + 'ou il est trop brillant. Changer de planche (objet bleu ou jaune : planche rouge et verte ; objet rouge ou vert : planche bleue et jaune), ou matifier l\'objet.';
+        + 'ou il est trop brillant. Changer de planche (objet bleu : planche rouge et jaune ; objet rouge : planche bleue et jaune ; objet jaune : planche noir et blanc), ou matifier l\'objet.';
     }
     message(txt, res.bord || minuscule ? 'alerte' : 'ok');
     $('resultat').scrollIntoView({ behavior: 'smooth', block: 'start' });

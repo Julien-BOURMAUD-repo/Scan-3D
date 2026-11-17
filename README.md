@@ -28,7 +28,7 @@ ouvrir `http://localhost:8000` (ouvrir `index.html` directement depuis l'explora
 | `recon-worker.js` | Sculpture du volume, maillage, lissage |
 | `planche.pdf` | Planche ChArUco A4 à imprimer (9 x 13 carrés de 20 mm) |
 | `planche-couleur.pdf` | Même planche en bleu et jaune |
-| `planche-rouge-vert.pdf` | Même planche en rouge et vert, pour les objets bleus ou jaunes |
+| `planche-rouge-jaune.pdf` | Même planche en rouge et jaune, pour les objets bleus |
 
 Les bibliothèques sont chargées depuis cdn.jsdelivr.net (OpenCV.js 5.0, three.js 0.160, et
 ONNX Runtime Web 1.22 si l'option IA est activée), puis gardées en cache par le navigateur.
@@ -140,9 +140,11 @@ ou "noir et blanc").
   et jaune clair. Tout le fond étant coloré, un objet blanc, gris ou noir ressort partout.
   L'appli reconnaît seule la planche utilisée, même si l'impression ressort sombre.
   Éviter seulement les objets bleu foncé ou jaunes, de la teinte des carrés.
-- **Planche rouge et verte** (`planche-rouge-vert.pdf`, imprimante couleur) : même principe, en
-  rouge foncé et vert clair, pour les objets bleus ou jaunes que la planche bleue et jaune ne voit
-  pas. À éviter pour les objets rouges ou verts. Les deux planches couleur se complètent.
+- **Planche rouge et jaune** (`planche-rouge-jaune.pdf`, imprimante couleur) : même principe, en
+  rouge foncé et jaune, pour les objets bleus que la planche bleue et jaune ne voit pas. Convient
+  aussi aux objets verts, blancs, gris, noirs. À éviter pour les objets rouges, orange ou jaunes.
+  Un vert clair a été essayé à la place du jaune : à l'impression il ressort pâle et terne, et se
+  confond avec un objet blanc. Objet jaune : planche noir et blanc.
 - **Fond coloré** (case à cocher à l'étape 3) : avec la planche noir et blanc, poser une feuille
   de couleur vive d'environ 10 x 10 cm au centre, sous l'objet, d'une autre couleur que lui.
 
